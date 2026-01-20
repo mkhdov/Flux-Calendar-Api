@@ -1,0 +1,58 @@
+spring:
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=500,expireAfterWrite=30s
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${ISSUER_URL}
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true  # Enables discovery-based routing
+          lower-case-service-id: true
+      routes:
+        - id: user-management-service-swagger
+          uri: lb://USER-MANAGEMENT-SERVICE
+          predicates:
+            - Path=/user-management/v3/api-docs/**, /user-management/swagger-ui/**, /user-management/swagger-ui.html
+          filters:
+            - StripPrefix=1
+        - id: calendars-service-swagger
+          uri: lb://CALENDARS-SERVICE
+          predicates:
+            - Path=/calendars/v3/api-docs/**, /calendars/swagger-ui/**, /calendars/swagger-ui.html
+          filters:
+            - StripPrefix=1
+        - id: user-management-service
+          uri: lb://USER-MANAGEMENT-SERVICE
+          predicates:
+            - Path=/users/**
+          filters:
+            - StripPrefix=0
+        - id: calendars-service
+          uri: lb://CALENDARS-SERVICE
+          predicates:
+            - Path=/calendars/**, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /tasks/**
+          filters:
+            - StripPrefix=0
+
+# Eureka Client Configuration
+eureka:
+  client:
+    register-with-eureka: true  # Register gateway itself
+    fetch-registry: true        # Fetch other services
+    service-url:
+      defaultZone: ${EUREKA_SERVICE_URL}
+  instance:
+    instance-id: ${spring.application.name}:${spring.application.instance_id:${random.value}}
+    hostname: ${EUREKA_HOSTNAME}
+    prefer-ip-address: false
+    lease-renewal-interval-in-seconds: 30
+    lease-expiration-duration-in-seconds: 90
+
+server:
+  port: 8083

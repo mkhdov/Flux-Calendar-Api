@@ -1,0 +1,49 @@
+spring:
+  datasource:
+    url: ${USER_PGURL}
+    username: ${USER_PGUSER}
+    password: ${USER_PGPASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Same realm as Gateway – this is important
+          issuer-uri: ${ISSUER_URL}
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-description: init
+    baseline-version: 0
+    url: ${USER_PGURL}
+    user: ${USER_PGUSER}
+    password: ${USER_PGPASSWORD}
+
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.type.mapping: "userEvent:com.flux.user_management_service.kafka.UserEvent"
+
+server:
+  port: ${PORT:8081}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVICE_URL}

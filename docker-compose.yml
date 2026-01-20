@@ -1,0 +1,151 @@
+version: '3.7'
+
+services:
+  flux:
+    image: postgres:16
+    container_name: flux
+    environment:
+      POSTGRES_PASSWORD: m12345
+      POSTGRES_DB: flux
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - flux-network
+
+  my-redis:
+    image: redis:latest
+    container_name: my-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - flux-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0.0
+    container_name: keycloak
+    environment:
+      # Initial admin user
+      - KEYCLOAK_ADMIN=admin
+      - KEYCLOAK_ADMIN_PASSWORD=admin
+    ports:
+      - "8080:8080"
+    command: start-dev
+    # If you want it to restart automatically when your machine reboots:
+    restart: unless-stopped
+    networks:
+      - flux-network
+
+  discovery-service:
+    build:
+      context: ./services/discovery-service
+    container_name: discovery-service
+    ports:
+      - "8761:8761"
+    networks:
+      - flux-network
+
+  config-service:
+    build:
+      context: ./services/flux-config-server
+    container_name: config-service
+    ports:
+      - "8888:8888"
+    depends_on:
+      - discovery-service
+    networks:
+      - flux-network
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+
+  user-management-service:
+    build:
+      context: ./services/user-management-service
+    container_name: user-management-service
+    ports:
+      - "8081:8081"
+    depends_on:
+      - flux
+      - my-redis
+      - config-service
+    networks:
+      - flux-network
+    environment:
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-service:8888
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://flux:5432/flux
+      - SPRING_DATA_REDIS_HOST=my-redis
+
+  calendar-service:
+    build:
+      context: ./services/calendar-service
+    container_name: calendar-service
+    ports:
+      - "8082:8082"
+    depends_on:
+      - flux
+      - my-redis
+      - config-service
+    networks:
+      - flux-network
+    environment:
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://config-service:8888
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://flux:5432/flux
+      - SPRING_DATA_REDIS_HOST=my-redis
+
+  gateway-service:
+    build:
+      context: ./services/gateway
+    container_name: gateway-service
+    ports:
+      - "8083:8080"
+    depends_on:
+      - config-service
+      - discovery-service
+    networks:
+      - flux-network
+    environment:
+      - CONFIG_URL=http://config-service:8888
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - flux-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9093:9093"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://127.0.0.1:9093
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - flux-network
+
+networks:
+  flux-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,28 @@
+server:
+  port: ${PORT:8888}
+spring:
+  profiles:
+    active: native
+  security:
+    user:
+      name: ${CONFIG_USERNAME}
+      password: ${CONFIG_PASSWORD}
+  application:
+    name: FluxConfigService
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: classpath:/configurations
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+  health:
+    defaults:
+      enabled: true

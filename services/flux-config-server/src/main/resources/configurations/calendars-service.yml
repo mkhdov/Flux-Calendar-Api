@@ -1,0 +1,95 @@
+spring:
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+  datasource:
+    url: ${CALENDAR_PGURL}
+    username: ${CALENDAR_PGUSER}
+    password: ${CALENDAR_PGPASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5
+  redis:
+    host: ${REDIS_HOST}
+    port: ${REDIS_PORT}
+    database: 0
+    timeout: 2000ms
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Same realm as Gateway – this is important
+          issuer-uri: ${ISSUER_URL}
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-description: init
+    baseline-version: 0
+    url: ${CALENDAR_PGURL}
+    user: ${CALENDAR_PGUSER}
+    password: ${CALENDAR_PGPASSWORD}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    consumer:
+      group-id: calendar-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
+      properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JsonDeserializer
+        spring.json.trusted.packages: "*"
+        spring.json.value.default.type: "com.flux.calendar_service.kafka.UserEvent"
+        spring.json.use.type.info.headers: true
+        spring.json.type.mapping: "userEvent:com.flux.calendar_service.kafka.UserEvent, com.flux.user_management_service.kafka.UserEvent:com.flux.calendar_service.kafka.UserEvent"
+
+google:
+  calendar:
+    enabled: true
+    client-id: ${GOOGLE_CLIENT_ID}
+    client-secret: ${GOOGLE_CLIENT_SECRET}
+    redirect-uri: ${GOOGLE_REDIRECT_URI}
+    scope:
+      - https://www.googleapis.com/auth/calendar
+    application-name: Calendar Sync App
+    calendar-id: primary
+
+minio:
+  endpoint: ${MINIO_ENDPOINT}
+  access-key: ${MINIO_ACCESS_KEY}
+  secret-key: ${MINIO_SECRET_KEY}
+  bucket: ${MINIO_BUCKET}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVICE_URL}
+
+server:
+  port: ${PORT:8082}
