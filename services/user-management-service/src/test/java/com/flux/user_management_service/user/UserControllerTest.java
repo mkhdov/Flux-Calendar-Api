@@ -57,10 +57,9 @@ class UserControllerTest {
 
     @Test
     void createUser_ShouldReturnUserId() throws Exception {
-        when(userService.createUser(eq("keycloak-1"), any(UserRequest.class))).thenReturn("1");
+        when(userService.createUser(any(UserRequest.class))).thenReturn("1");
 
-        mockMvc.perform(post("/users")
-                .param("keycloakId", "keycloak-1")
+        mockMvc.perform(post("/users/add")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(userRequest)))
                 .andExpect(status().isCreated())
@@ -72,16 +71,6 @@ class UserControllerTest {
         when(userService.getUserById("1")).thenReturn(userResponse);
 
         mockMvc.perform(get("/users/1"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value("1"))
-                .andExpect(jsonPath("$.firstname").value("John"));
-    }
-
-    @Test
-    void getUserByKeycloakId_ShouldReturnUserResponse() throws Exception {
-        when(userService.getUserByKeycloakId("keycloak-1")).thenReturn(userResponse);
-
-        mockMvc.perform(get("/users/keycloak/keycloak-1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("1"))
                 .andExpect(jsonPath("$.firstname").value("John"));
@@ -109,8 +98,7 @@ class UserControllerTest {
     void createUser_ShouldReturnBadRequest_WhenValidationFails() throws Exception {
         UserRequest invalidRequest = new UserRequest("", "", "invalid-email", null);
 
-        mockMvc.perform(post("/users")
-                .param("keycloakId", "keycloak-1")
+        mockMvc.perform(post("/users/add")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(invalidRequest)))
                 .andExpect(status().isBadRequest())

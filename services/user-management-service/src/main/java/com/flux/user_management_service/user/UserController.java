@@ -32,20 +32,14 @@ public class UserController {
 
     @PostMapping("/add")
     @Operation(summary = "Create a new user", description = "Creates a new user with the provided details and Keycloak ID")
-    public ResponseEntity<String> createUser(@RequestParam String keycloakId, @RequestBody @Valid UserRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(userService.createUser(keycloakId, request));
+    public ResponseEntity<String> createUser(@RequestBody @Valid UserRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(userService.createUser(request));
     }
 
     @GetMapping("/{id}")
     @Operation(summary = "Get user by ID", description = "Retrieves a user by their unique ID")
     public ResponseEntity<UserResponse> getUserById(@PathVariable String id) {
         return ResponseEntity.status(HttpStatus.OK).body(userService.getUserById(id));
-    }
-
-    @GetMapping("/keycloak/{keycloakId}")
-    @Operation(summary = "Get user by Keycloak ID", description = "Retrieves a user by their Keycloak unique ID")
-    public ResponseEntity<UserResponse> getUserByKeycloakId(@PathVariable String keycloakId) {
-        return ResponseEntity.status(HttpStatus.OK).body(userService.getUserByKeycloakId(keycloakId));
     }
 
     @PutMapping("/{id}")

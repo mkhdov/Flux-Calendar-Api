@@ -16,3 +16,21 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: dummy
+            client-secret: dummy
+        provider:
+          google:
+            issuer-uri: https://accounts.google.com
+
+app:
+  frontend:
+    url: http://localhost:3000
+  jwt:
+    secret: 9a2f8c4e6b0d71f3e8b925a45747f894a3d6bc70fa8d5e21a15a6d8c3b9a0e7c9a2f8c4e6b0d71f3e8b925a45747f894a3d6bc70fa8d5e21a15a6d8c3b9a0e7c
+    expiration: 86400000
+

@@ -6,8 +6,10 @@ import com.flux.calendar_service.event.EventStatus;
 import com.flux.calendar_service.event.EventType;
 import com.flux.calendar_service.event.SyncStatus;
 import com.flux.calendar_service.location.dto.LocationResponse;
+import com.flux.calendar_service.member.dto.MemberResponseDTO;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record EventResponse(
                 String id,
@@ -23,8 +25,9 @@ public record EventResponse(
                 boolean allDay,
                 SyncStatus syncStatus,
                 EventStatus status,
-                java.util.List<com.flux.calendar_service.task.dto.TaskResponse> tasks,
-                java.util.List<com.flux.calendar_service.attachment.dto.AttachmentResponse> attachments,
+                List<com.flux.calendar_service.task.dto.TaskResponse> tasks,
+                List<com.flux.calendar_service.attachment.dto.AttachmentResponse> attachments,
+                List<MemberResponseDTO> members,
                 LocalDateTime createdAt,
                 LocalDateTime updatedAt) {
 }

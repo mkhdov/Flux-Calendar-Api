@@ -30,6 +30,12 @@ public class SecurityConfig {
                                                                 "/auth/**",
                                                                 "/users/add",
                                                                 "/users/keycloak/**",
+                                                                "/api/users/login/**",
+                                                                "/api/auth/**",
+                                                                "/api/auth/**",
+                                                                "/login",
+                                                                "/oauth2/**",
+                                                                "/api/users/login/**",
                                                                 "/users/sync")
                                                 .permitAll()
                                                 .anyExchange().authenticated())

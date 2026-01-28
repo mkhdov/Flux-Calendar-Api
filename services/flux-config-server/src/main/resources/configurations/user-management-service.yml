@@ -6,8 +6,9 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5
+
   security:
-    oauth2:
+
       resourceserver:
         jwt:
           # Same realm as Gateway – this is important
@@ -17,6 +18,22 @@ spring:
       ddl-auto: none
     show-sql: true
     database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+  mail:
+    host: ${MAIL_HOST}
+    port: ${MAIL_PORT}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
 
   flyway:
     enabled: true
@@ -41,9 +58,17 @@ spring:
         spring.json.type.mapping: "userEvent:com.flux.user_management_service.kafka.UserEvent"
 
 server:
-  port: ${PORT:8081}
+  port: ${USER_MANAGEMENT_PORT}
 
 eureka:
   client:
     service-url:
       defaultZone: ${EUREKA_SERVICE_URL}
+
+app:
+
+  frontend:
+    url: ${FRONTEND_URL}
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration: ${JWT_EXPIRATION}

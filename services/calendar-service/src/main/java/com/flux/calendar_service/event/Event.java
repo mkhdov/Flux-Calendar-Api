@@ -3,6 +3,7 @@ package com.flux.calendar_service.event;
 import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.conference.Conference;
 import com.flux.calendar_service.location.Location;
+import com.flux.calendar_service.member.Member;
 import com.flux.calendar_service.task.Task;
 import com.flux.calendar_service.attachment.Attachment;
 import jakarta.persistence.*;
@@ -53,6 +54,10 @@ public class Event {
     @Builder.Default
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<Attachment> attachments = new ArrayList<>();
+
+    @Builder.Default
+    @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<Member> members = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "location_id")

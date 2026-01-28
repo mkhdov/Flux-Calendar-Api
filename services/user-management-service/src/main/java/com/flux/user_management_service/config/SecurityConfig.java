@@ -1,29 +1,68 @@
 package com.flux.user_management_service.config;
 
+import com.flux.user_management_service.security.JwtAuthenticationFilter;
+import com.flux.user_management_service.security.JwtTokenProvider;
+import com.flux.user_management_service.user.CustomUserDetailsService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-
-import static org.springframework.security.config.Customizer.withDefaults;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 @EnableWebSecurity
-public class SecurityConfig {
+@EnableMethodSecurity
+@RequiredArgsConstructor
+class SecurityConfig {
+
+    private final JwtTokenProvider jwtTokenProvider;
+    private final CustomUserDetailsService userDetailsService;
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public JwtAuthenticationFilter jwtAuthenticationFilter() {
+        return new JwtAuthenticationFilter(jwtTokenProvider, userDetailsService);
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
+        return authConfig.getAuthenticationManager();
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // allow health/actuator, user creation, and keycloak lookups
-                        .requestMatchers("/actuator/**", "/users/add", "/users/keycloak/**", "/users/sync").permitAll()
-                        // all other endpoints require valid JWT
+                        .requestMatchers(
+                                "/api/auth/**",
+                                "/api/users/login/**",
+                                "/oauth2/**",
+                                "/actuator/**",
+                                "/users/add",
+                                "/users/keycloak/**",
+                                "/users/sync",
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/error")
+                        .permitAll()
                         .anyRequest().authenticated())
-                // enable OAuth2 Resource Server with JWT (autoconfigured via issuer-uri)
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(withDefaults()))
-                // disable CSRF for stateless REST APIs
-                .csrf(csrf -> csrf.disable());
+
+                .addFilterBefore(jwtAuthenticationFilter(), UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

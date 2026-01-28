@@ -30,6 +30,9 @@ class UserServiceTest {
     @Mock
     private UserMapper userMapper;
 
+    @Mock
+    private com.flux.user_management_service.kafka.UserProducer userProducer;
+
     @InjectMocks
     private UserService userService;
 
@@ -41,7 +44,6 @@ class UserServiceTest {
     void setUp() {
         user = User.builder()
                 .id("1")
-                .keycloakId("keycloak-1")
                 .firstname("John")
                 .lastname("Doe")
                 .email("john.doe@example.com")
@@ -57,7 +59,7 @@ class UserServiceTest {
         when(userRepository.existsByEmail(anyString())).thenReturn(false);
         when(userRepository.save(any(User.class))).thenReturn(user);
 
-        String userId = userService.createUser("keycloak-1", userRequest);
+        String userId = userService.createUser(userRequest);
 
         assertEquals("1", userId);
         verify(userRepository).save(any(User.class));
@@ -67,7 +69,7 @@ class UserServiceTest {
     void createUser_ShouldThrowException_WhenEmailExists() {
         when(userRepository.existsByEmail(anyString())).thenReturn(true);
 
-        assertThrows(UserAlreadyExistsException.class, () -> userService.createUser("keycloak-1", userRequest));
+        assertThrows(UserAlreadyExistsException.class, () -> userService.createUser(userRequest));
         verify(userRepository, never()).save(any(User.class));
     }
 
@@ -87,24 +89,6 @@ class UserServiceTest {
         when(userRepository.findById("1")).thenReturn(Optional.empty());
 
         assertThrows(UserNotFoundException.class, () -> userService.getUserById("1"));
-    }
-
-    @Test
-    void getUserByKeycloakId_ShouldReturnUserResponse_WhenUserExists() {
-        when(userRepository.findByKeycloakId("keycloak-1")).thenReturn(Optional.of(user));
-        when(userMapper.toUserResponse(user)).thenReturn(userResponse);
-
-        UserResponse response = userService.getUserByKeycloakId("keycloak-1");
-
-        assertNotNull(response);
-        assertEquals("1", response.id());
-    }
-
-    @Test
-    void getUserByKeycloakId_ShouldThrowException_WhenUserDoesNotExist() {
-        when(userRepository.findByKeycloakId("keycloak-1")).thenReturn(Optional.empty());
-
-        assertThrows(UserNotFoundException.class, () -> userService.getUserByKeycloakId("keycloak-1"));
     }
 
     @Test

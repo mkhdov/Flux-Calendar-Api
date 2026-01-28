@@ -13,6 +13,8 @@ import com.flux.calendar_service.location.Location;
 import com.flux.calendar_service.location.LocationMapper;
 import com.flux.calendar_service.location.LocationRepository;
 import com.flux.calendar_service.exception.*;
+import com.flux.calendar_service.member.Member;
+import com.flux.calendar_service.member.MemberRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +38,7 @@ public class EventService {
     private final LocationMapper locationMapper;
     private final ConferenceRepository conferenceRepository;
     private final ConferenceMapper conferenceMapper;
+    private final MemberRepository memberRepository;
 
     @Autowired(required = false)
     private GoogleCalendarApiService googleCalendarApiService;
@@ -112,6 +115,14 @@ public class EventService {
         } else {
             log.debug("Google Calendar integration is disabled. Event created locally only.");
         }
+        Member member = Member.builder()
+                .fullName("Owner")
+                .email("Owner")
+                .isOwner(true)
+                .event(savedEvent)
+                .build();
+
+        memberRepository.save(member);
 
         return savedEvent.getId();
     }
@@ -233,6 +244,15 @@ public class EventService {
             eventRepository.save(savedEvent);
         }
 
+        Member member = Member.builder()
+                .fullName("Owner")
+                .email("Owner")
+                .isOwner(true)
+                .event(savedEvent)
+                .build();
+
+        memberRepository.save(member);
+
         return savedEvent.getId();
     }
 
@@ -306,6 +326,15 @@ public class EventService {
             log.error("Failed to add Google Meet to event. Event ID: {}", event.getId(), e);
             throw new ServiceUnavailableException("Failed to add Google Meet", e);
         }
+
+        Member member = Member.builder()
+                .fullName("Owner")
+                .email("Owner")
+                .isOwner(true)
+                .event(event)
+                .build();
+
+        memberRepository.save(member);
     }
 
     @Transactional
@@ -370,6 +399,15 @@ public class EventService {
 
         return eventRepository.findById(id)
                 .map(eventMapper::toEventResponse)
+                .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
+    }
+
+    public Event getEventByIdTypeEvent(String id) {
+        if (id == null || id.isBlank()) {
+            throw new EmptyFieldException("Event ID cannot be empty");
+        }
+
+        return eventRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
     }
 

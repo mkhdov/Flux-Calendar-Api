@@ -1,12 +1,10 @@
 package com.flux.user_management_service.user;
 
-import java.util.List;
-import java.util.stream.Collectors;
-
-import org.apache.commons.lang.StringUtils;
+import org.springframework.util.StringUtils;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.CachePut;
+
 import org.springframework.cache.annotation.Cacheable;
+
 import org.springframework.stereotype.Service;
 
 import com.flux.user_management_service.exception.UserAlreadyExistsException;
@@ -23,12 +21,11 @@ public class UserService {
     private final UserMapper userMapper;
     private final com.flux.user_management_service.kafka.UserProducer userProducer;
 
-    public String createUser(String keycloakId, UserRequest request) {
+    public String createUser(UserRequest request) {
         if (userRepository.existsByEmail(request.email())) {
             throw new UserAlreadyExistsException("User with email " + request.email() + " already exists");
         }
         User user = User.builder()
-                .keycloakId(keycloakId)
                 .firstname(request.firstname())
                 .lastname(request.lastname())
                 .email(request.email())
@@ -55,13 +52,6 @@ public class UserService {
                 .orElseThrow(() -> new UserNotFoundException("User not found!"));
     }
 
-    @Cacheable(value = "users", key = "'keycloak:' + #keycloakId")
-    public UserResponse getUserByKeycloakId(String keycloakId) {
-        return userRepository.findByKeycloakId(keycloakId)
-                .map(userMapper::toUserResponse)
-                .orElseThrow(() -> new UserNotFoundException("User not found with Keycloak ID: " + keycloakId));
-    }
-
     @CacheEvict(value = "users", allEntries = true)
     public void updateUser(String id, UserRequest request) {
         var user = userRepository.findById(id)
@@ -81,12 +71,13 @@ public class UserService {
     }
 
     private void mergeUser(User user, UserRequest request) {
-        if (StringUtils.isNotBlank(request.firstname())) {
+        if (StringUtils.hasText(request.firstname())) {
             user.setFirstname(request.firstname());
         }
-        if (StringUtils.isNotBlank(request.lastname())) {
+        if (StringUtils.hasText(request.lastname())) {
             user.setLastname(request.lastname());
         }
+
     }
 
     @CacheEvict(value = "users", allEntries = true)

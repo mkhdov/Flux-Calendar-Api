@@ -30,13 +30,13 @@ spring:
         - id: user-management-service
           uri: lb://USER-MANAGEMENT-SERVICE
           predicates:
-            - Path=/users/**
+            - Path=/users/**, /api/auth/**, /login, /api/users/login/**, /oauth2/**
           filters:
             - StripPrefix=0
         - id: calendars-service
           uri: lb://CALENDARS-SERVICE
           predicates:
-            - Path=/calendars/**, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /tasks/**
+            - Path=/calendars/**, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /tasks/**, /api/users/login/**
           filters:
             - StripPrefix=0
 
@@ -55,4 +55,4 @@ eureka:
     lease-expiration-duration-in-seconds: 90
 
 server:
-  port: 8083
+  port: ${GATEWAY_PORT}

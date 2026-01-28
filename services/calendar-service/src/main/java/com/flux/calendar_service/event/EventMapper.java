@@ -8,11 +8,13 @@ import com.flux.calendar_service.event.dto.EventRequest;
 import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
 import com.flux.calendar_service.location.LocationMapper;
+import com.flux.calendar_service.member.MemberMapper;
 import com.flux.calendar_service.task.TaskMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Service
@@ -23,6 +25,7 @@ public class EventMapper {
     private final ConferenceMapper conferenceMapper;
     private final TaskMapper taskMapper;
     private final AttachmentMapper attachmentMapper;
+    private final MemberMapper memberMapper;
 
     public EventResponse toEventResponse(Event event) {
         if (event == null) {
@@ -43,11 +46,17 @@ public class EventMapper {
                 event.isAllDay(),
                 event.getSyncStatus(),
                 event.getStatus(),
-                event.getTasks() != null ? event.getTasks().stream().map(taskMapper::toTaskResponse).toList()
-                        : java.util.Collections.emptyList(),
+                event.getTasks() != null
+                        ? event.getTasks().stream().map(taskMapper::toTaskResponse).toList()
+                        : Collections.emptyList(),
+
                 event.getAttachments() != null
                         ? event.getAttachments().stream().map(attachmentMapper::toAttachmentResponse).toList()
-                        : java.util.Collections.emptyList(),
+                        : Collections.emptyList(),
+
+                event.getMembers() != null
+                        ? event.getMembers().stream().map(memberMapper::toMemberResponse).toList()
+                        : Collections.emptyList(),
                 event.getCreatedAt(),
                 event.getUpdatedAt());
     }

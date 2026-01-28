@@ -10,7 +10,7 @@ eureka:
       defaultZone: http://${EUREKA_HOSTNAME}:${server.port}/eureka/
 
 server:
-  port: ${PORT:8761}
+  port: ${DISCOVERY_PORT}
 
 spring:
   application:
