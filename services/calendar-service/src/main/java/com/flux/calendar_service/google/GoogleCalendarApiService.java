@@ -930,12 +930,20 @@ public class GoogleCalendarApiService {
          * Helper class for sync token results
          */
         public static class EventsResult {
-                public List<Event> events;
-                public String nextSyncToken;
+                private final List<Event> events;
+                private final String nextSyncToken;
 
                 public EventsResult(List<Event> events, String nextSyncToken) {
                         this.events = events;
                         this.nextSyncToken = nextSyncToken;
+                }
+
+                public List<Event> getEvents() {
+                        return events;
+                }
+
+                public String getNextSyncToken() {
+                        return nextSyncToken;
                 }
         }
 

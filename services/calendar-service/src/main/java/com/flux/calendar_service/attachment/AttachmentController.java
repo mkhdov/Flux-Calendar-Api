@@ -4,6 +4,7 @@ import com.flux.calendar_service.attachment.dto.AttachmentResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.InputStreamResource;
@@ -23,7 +24,11 @@ public class AttachmentController {
     private final AttachmentService attachmentService;
 
     @Operation(summary = "Upload an attachment", description = "Uploads a file and associates it as an attachment to a specific event")
-    @ApiResponse(responseCode = "201", description = "Attachment uploaded successfully")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Attachment uploaded successfully"),
+            @ApiResponse(responseCode = "404", description = "Event not found"),
+            @ApiResponse(responseCode = "400", description = "Invalid file or upload failed")
+    })
     @PostMapping(value = "/event/{eventId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<AttachmentResponse> uploadAttachment(
             @Parameter(description = "ID of the event") @PathVariable String eventId,
@@ -51,7 +56,10 @@ public class AttachmentController {
     }
 
     @Operation(summary = "Delete an attachment", description = "Deletes a specific attachment and its associated file")
-    @ApiResponse(responseCode = "204", description = "Attachment deleted successfully")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Attachment deleted successfully"),
+            @ApiResponse(responseCode = "404", description = "Attachment not found")
+    })
     @DeleteMapping("/{attachmentId}")
     public ResponseEntity<Void> deleteAttachment(
             @Parameter(description = "ID of the attachment") @PathVariable String attachmentId) {

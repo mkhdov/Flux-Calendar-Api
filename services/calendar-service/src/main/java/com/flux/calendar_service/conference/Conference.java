@@ -55,6 +55,28 @@ public class Conference {
     @Column(name = "platform_name")
     private String platformName;
 
+    // Zoom specific fields
+    @Column(name = "zoom_meeting_id")
+    private String zoomMeetingId; // Zoom's meeting ID
+
+    @Column(name = "start_url", length = 1000)
+    private String startUrl; // Host start URL
+
+    @Column(name = "host_email")
+    private String hostEmail; // Zoom host email
+
+    @Column(name = "duration")
+    private Integer duration; // Meeting duration in minutes
+
+    @Column(name = "timezone")
+    private String timezone; // Meeting timezone
+
+    @Column(name = "agenda", columnDefinition = "TEXT")
+    private String agenda; // Meeting agenda/description
+
+    @Column(name = "settings", columnDefinition = "TEXT")
+    private String settings; // JSON string of meeting settings
+
     // Sync tracking
     @Column(name = "sync_status")
     @Enumerated(EnumType.STRING)
@@ -76,7 +98,8 @@ public class Conference {
     private Event event;
 
     public enum ConferenceType {
-        GOOGLE_MEET
+        GOOGLE_MEET,
+        ZOOM
     }
 
     public enum SyncStatus {

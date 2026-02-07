@@ -1,6 +1,7 @@
 package com.flux.calendar_service.calendar;
 
 import com.flux.calendar_service.event.Event;
+import com.flux.calendar_service.task.Task;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -55,6 +56,15 @@ public class Calendar {
     @LastModifiedDate
     private LocalDateTime updatedAt;
 
+    @Column(name = "last_google_sync")
+    private LocalDateTime lastGoogleSync;
+
+    @Column(name = "google_sync_token")
+    private String googleSyncToken;
+
     @OneToMany(mappedBy = "calendar", cascade = CascadeType.ALL)
     private List<Event> events = new ArrayList<>();
+
+    @OneToMany(mappedBy = "calendar", cascade = CascadeType.ALL)
+    private List<Task> tasks = new ArrayList<>();
 }

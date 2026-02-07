@@ -54,7 +54,7 @@ This document provides a comprehensive list of all API endpoints available in th
 | :--- | :--- | :--- |
 | `POST` | `/events/calendar/{calendarId}` | **Create event.** Creates a new event in the specified calendar. |
 | `POST` | `/events/calendar/{calendarId}/add-meet` | **Create event with Google Meet.** Creates an event and automatically generates a Google Meet link. |
-| `POST` | `/events/calendar/{calendarId}/add-zoom` | **Create event with Zoom.** Creates an event and automatically generates a Zoom meeting link. |
+| `POST` | `/events/calendar/{calendarId}/add-zoom` | **Create event with Zoom.** Creates an event and automatically generates a Zoom meeting link. Requires `X-User-Id` header. |
 | `GET` | `/events` | **Get all events.** Retrieves all events across all calendars. |
 | `GET` | `/events/{id}` | **Get event by ID.** Retrieves details of a specific event. |
 | `GET` | `/events/calendar/{calendarId}` | **Get events by calendar.** Returns all events associated with a specific calendar. |
@@ -63,6 +63,8 @@ This document provides a comprehensive list of all API endpoints available in th
 | `DELETE` | `/events/{id}` | **Delete event.** Removes an event from the calendar. |
 | `PUT` | `/events/{eventId}/location/{locationId}` | **Attach location.** Links an existing location record to a specific event. |
 | `PUT` | `/events/{eventId}/conference/{conferenceId}` | **Attach conference.** Links an existing conference record to a specific event. |
+| `POST` | `/events/add-zoom/{id}` | **Add Zoom to existing event.** Adds a Zoom meeting to an existing event. Requires `X-User-Id` header. |
+| `DELETE` | `/events/remove-zoom/{id}` | **Remove Zoom from event.** Removes the Zoom meeting from an event. Requires `X-User-Id` header. |
 
 ### Conference Controller
 **Base Path:** `/conference`
@@ -96,3 +98,40 @@ This document provides a comprehensive list of all API endpoints available in th
 | `GET` | `/auth/status` | **Check Auth Status.** Returns whether the user is currently authenticated with Google. |
 | `POST` | `/auth/logout` | **Logout.** Revokes Google tokens and clears the user session. |
 | `POST` | `/auth/refresh` | **Refresh Token.** Manually triggers a refresh of the Google access token. |
+
+### Zoom Integration Controller
+**Base Path:** `/zoom`
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/zoom/connect` | **Connect Zoom Account.** Redirects the user to Zoom's OAuth authorization page. Requires `X-User-Id` header. |
+| `GET` | `/zoom/callback` | **OAuth Callback.** Handles Zoom OAuth callback after authorization. Exchanges authorization code for access token. Accepts `code` and `state` query parameters. |
+| `DELETE` | `/zoom/disconnect` | **Disconnect Zoom Account.** Removes Zoom credentials for the user. Requires `X-User-Id` header. |
+| `GET` | `/zoom/status` | **Check Zoom Connection Status.** Returns whether the user has connected their Zoom account. Requires `X-User-Id` header. |
+| `POST` | `/zoom/events/{eventId}/meeting` | **Create Zoom Meeting.** Creates a Zoom meeting for the specified event. Requires `X-User-Id` header. Returns meeting details including join URL. |
+| `PATCH` | `/zoom/events/{eventId}/meeting` | **Update Zoom Meeting.** Updates an existing Zoom meeting for the specified event. Requires `X-User-Id` header. |
+| `DELETE` | `/zoom/events/{eventId}/meeting` | **Delete Zoom Meeting.** Deletes the Zoom meeting associated with the event. Requires `X-User-Id` header. |
+
+### Members Controller
+**Base Path:** `/members`
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/members/share/event/{eventId}/{email}` | **Invite Member to Event.** Sends an invitation email to a user to join an event. |
+| `POST` | `/members/join/event/{eventId}/{email}` | **Join Event.** Adds a member to an event. Requires `MemberRequest` body with `email` and `fullName`. |
+| `GET` | `/members/event/{eventId}` | **Get Event Members.** Retrieves all members of a specific event. Returns a list of `MemberResponseDTO` objects. |
+| `GET` | `/members/delete/{memberId}` | **Delete Member.** Removes a member from an event. Requires `memberId` path parameter and `userId` query parameter. Only event owner can remove members. |
+
+---
+
+## Swagger UI
+
+Interactive API documentation is available at: `http://localhost:8083/swagger-ui.html`
+
+The Swagger UI provides:
+- Complete API reference with request/response schemas
+- Interactive API testing
+- Authentication requirements
+- Error response documentation
+- Example requests and responses
+

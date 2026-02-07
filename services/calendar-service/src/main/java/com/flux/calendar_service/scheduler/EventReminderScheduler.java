@@ -88,9 +88,9 @@ public class EventReminderScheduler {
 
         sb.append("</ul>");
 
-        if (!event.getTasks().isEmpty()) {
-            sb.append("<h3>Tasks:</h3><ul>");
-            event.getTasks().forEach(task -> sb.append("<li>").append(task.getTask()).append("</li>"));
+        if (!event.getSubtasks().isEmpty()) {
+            sb.append("<h3>Subtasks:</h3><ul>");
+            event.getSubtasks().forEach(subtask -> sb.append("<li>").append(subtask.getSubtask()).append("</li>"));
             sb.append("</ul>");
         }
 

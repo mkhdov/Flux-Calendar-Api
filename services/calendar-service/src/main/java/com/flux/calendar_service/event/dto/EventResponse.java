@@ -7,27 +7,30 @@ import com.flux.calendar_service.event.EventType;
 import com.flux.calendar_service.event.SyncStatus;
 import com.flux.calendar_service.location.dto.LocationResponse;
 import com.flux.calendar_service.member.dto.MemberResponseDTO;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
+@Schema(description = "Event response with full details including calendar, location, conference, subtasks, attachments, members and notes")
 public record EventResponse(
-                String id,
-                CalendarResponse calendar,
-                String title,
-                String description,
-                String colorHex,
-                LocationResponse location,
-                ConferenceResponse conference,
-                EventType type,
-                LocalDateTime startTime,
-                LocalDateTime endTime,
-                boolean allDay,
-                SyncStatus syncStatus,
-                EventStatus status,
-                List<com.flux.calendar_service.task.dto.TaskResponse> tasks,
-                List<com.flux.calendar_service.attachment.dto.AttachmentResponse> attachments,
-                List<MemberResponseDTO> members,
-                LocalDateTime createdAt,
-                LocalDateTime updatedAt) {
+        @Schema(description = "Unique event ID") String id,
+        @Schema(description = "Calendar this event belongs to") CalendarResponse calendar,
+        @Schema(description = "Event title") String title,
+        @Schema(description = "Event description") String description,
+        @Schema(description = "Hex color code") String colorHex,
+        @Schema(description = "Event location") LocationResponse location,
+        @Schema(description = "Conference/meeting link") ConferenceResponse conference,
+        @Schema(description = "Event type") EventType type,
+        @Schema(description = "Start time") LocalDateTime startTime,
+        @Schema(description = "End time") LocalDateTime endTime,
+        @Schema(description = "All-day event flag") boolean allDay,
+        @Schema(description = "Sync status with Google") SyncStatus syncStatus,
+        @Schema(description = "Event status") EventStatus status,
+        @Schema(description = "List of subtasks") List<com.flux.calendar_service.subtask.dto.SubtaskResponse> subtasks,
+        @Schema(description = "List of attachments") List<com.flux.calendar_service.attachment.dto.AttachmentResponse> attachments,
+        @Schema(description = "List of members") List<MemberResponseDTO> members,
+        @Schema(description = "List of notes") List<com.flux.calendar_service.note.dto.NoteResponse> notes,
+        @Schema(description = "Creation timestamp") LocalDateTime createdAt,
+        @Schema(description = "Last update timestamp") LocalDateTime updatedAt) {
 }

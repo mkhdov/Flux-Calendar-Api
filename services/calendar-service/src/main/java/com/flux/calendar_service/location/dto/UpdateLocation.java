@@ -1,16 +1,18 @@
 package com.flux.calendar_service.location.dto;
 
-public record UpdateLocation(
-        String placeName,
-        String streetAddress,
-        String city,
-        String country,
-        String buildingName,
-        Integer floor,
-        String room,
-        Double latitude,
-        Double longitude,
-        String placeId
-) {
+import io.swagger.v3.oas.annotations.media.Schema;
 
+@Schema(description = "Request body for updating a location (all fields optional)")
+public record UpdateLocation(
+        @Schema(description = "Place name") String placeName,
+        @Schema(description = "Street address") String streetAddress,
+        @Schema(description = "City") String city,
+        @Schema(description = "Country") String country,
+        @Schema(description = "Building name") String buildingName,
+        @Schema(description = "Floor number") Integer floor,
+        @Schema(description = "Room") String room,
+        @Schema(description = "Latitude") Double latitude,
+        @Schema(description = "Longitude") Double longitude,
+        @Schema(description = "Google Place ID") String placeId
+) {
 }

@@ -3,11 +3,14 @@ spring:
     type: caffeine
     caffeine:
       spec: maximumSize=500,expireAfterWrite=30s
+
   security:
     oauth2:
       resourceserver:
         jwt:
           issuer-uri: ${ISSUER_URL}
+          jwk-set-uri: ${JWT_SET_URL}
+
   cloud:
     gateway:
       discovery:
@@ -36,7 +39,7 @@ spring:
         - id: calendars-service
           uri: lb://CALENDARS-SERVICE
           predicates:
-            - Path=/calendars/**, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /tasks/**, /api/users/login/**
+            - Path=/calendars/**, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /api/tasks/**, /api/users/login/**, /zoom/**, subtasks/**, /notes/**, /members/**
           filters:
             - StripPrefix=0
 
@@ -53,6 +56,8 @@ eureka:
     prefer-ip-address: false
     lease-renewal-interval-in-seconds: 30
     lease-expiration-duration-in-seconds: 90
-
+app:
+  jwt:
+    secret: ${JWT_SECRET}
 server:
   port: ${GATEWAY_PORT}

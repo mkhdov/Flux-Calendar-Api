@@ -1,10 +1,11 @@
 package com.flux.calendar_service.task;
 
-import com.flux.calendar_service.event.Event;
-import com.flux.calendar_service.event.EventRepository;
+import com.flux.calendar_service.calendar.Calendar;
+import com.flux.calendar_service.calendar.CalendarRepository;
+import com.flux.calendar_service.exception.ResourceNotFoundException;
 import com.flux.calendar_service.task.dto.TaskRequest;
 import com.flux.calendar_service.task.dto.TaskResponse;
-import com.flux.calendar_service.exception.ResourceNotFoundException;
+import com.flux.calendar_service.task.dto.TaskUpdateRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,78 +17,54 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TaskService {
     private final TaskRepository taskRepository;
-    private final EventRepository eventRepository;
+    private final CalendarRepository calendarRepository;
     private final TaskMapper taskMapper;
 
     @Transactional
-    public String createTask(String eventId, String taskDescription) {
-        Event event = eventRepository.findById(eventId)
-                .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
+    public TaskResponse createTask(TaskRequest request) {
+        Calendar calendar = calendarRepository.findById(request.calendarId())
+                .orElseThrow(
+                        () -> new ResourceNotFoundException("Calendar not found with ID: " + request.calendarId()));
 
-        Task task = Task.builder()
-                .task(taskDescription)
-                .isDone(false)
-                .event(event)
-                .build();
+        Task task = taskMapper.toTask(request, calendar);
+        if (task.getSubtasks() != null) {
+            task.getSubtasks().forEach(subtask -> subtask.setTask(task));
+        }
+        Task savedTask = taskRepository.save(task);
 
-        return taskRepository.save(task).getId();
+        return taskMapper.toTaskResponse(savedTask);
     }
 
-    public List<TaskResponse> getAllTasksByEventId(String eventId) {
-        return taskRepository.findAllByEventId(eventId).stream()
-                .map(taskMapper::toTaskResponse)
-                .collect(Collectors.toList());
-    }
-
-    public List<TaskResponse> getAllTasks() {
-        return taskRepository.findAll().stream()
-                .map(taskMapper::toTaskResponse)
-                .collect(Collectors.toList());
-    }
-
-    public TaskResponse getById(String id) {
+    @Transactional(readOnly = true)
+    public TaskResponse getTask(String id) {
         return taskRepository.findById(id)
                 .map(taskMapper::toTaskResponse)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found with ID: " + id));
     }
 
-    @Transactional
-    public void completeTask(String id) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Task not found with ID: " + id));
-        task.setDone(true);
-        taskRepository.save(task);
+    @Transactional(readOnly = true)
+    public List<TaskResponse> getAllTasks(String calendarId) {
+        return taskRepository.findAllByCalendarId(calendarId).stream()
+                .map(taskMapper::toTaskResponse)
+                .collect(Collectors.toList());
     }
 
     @Transactional
-    public void incompleteTask(String id) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Task not found with ID: " + id));
-        task.setDone(false);
-        taskRepository.save(task);
-    }
-
-    @Transactional
-    public TaskResponse updateTask(String id, TaskRequest request) {
+    public TaskResponse updateTask(String id, TaskUpdateRequest request) {
         Task task = taskRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found with ID: " + id));
 
-        task.setTask(request.task());
-        task.setDone(request.isDone());
+        taskMapper.updateTaskFromRequest(request, task);
+        Task updatedTask = taskRepository.save(task);
 
-        return taskMapper.toTaskResponse(taskRepository.save(task));
+        return taskMapper.toTaskResponse(updatedTask);
     }
 
     @Transactional
     public void deleteTask(String id) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Task not found with ID: " + id));
-
-        // Remove from Event's list to maintain bidirectional consistency
-        if (task.getEvent() != null) {
-            task.getEvent().getTasks().remove(task);
+        if (!taskRepository.existsById(id)) {
+            throw new ResourceNotFoundException("Task not found with ID: " + id);
         }
-
-        taskRepository.delete(task);
+        taskRepository.deleteById(id);
     }
 }

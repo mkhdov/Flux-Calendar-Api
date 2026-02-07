@@ -16,4 +16,6 @@ public interface EventRepository extends JpaRepository<Event, String> {
     Optional<Event> findEventByLocationId(String locationId);
 
     List<Event> findByStartTimeBetween(LocalDateTime start, LocalDateTime end);
+
+    Optional<Event> findByGoogleCalendarId(String googleCalendarId);
 }

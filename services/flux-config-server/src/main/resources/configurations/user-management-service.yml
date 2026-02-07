@@ -11,8 +11,7 @@ spring:
 
       resourceserver:
         jwt:
-          # Same realm as Gateway – this is important
-          issuer-uri: ${ISSUER_URL}
+          jwk-set-uri: ${JWT_SET_URL}
   jpa:
     hibernate:
       ddl-auto: none
@@ -66,7 +65,6 @@ eureka:
       defaultZone: ${EUREKA_SERVICE_URL}
 
 app:
-
   frontend:
     url: ${FRONTEND_URL}
   jwt:

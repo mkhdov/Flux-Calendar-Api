@@ -8,7 +8,7 @@ CREATE TABLE users (
 
     password VARCHAR(255),
 
-    birthday DATE NOT NULL,
+    birthday DATE,
 
     provider VARCHAR(50),
     provider_id VARCHAR(255),

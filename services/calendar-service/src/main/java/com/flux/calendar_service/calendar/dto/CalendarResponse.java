@@ -1,19 +1,21 @@
 package com.flux.calendar_service.calendar.dto;
 
 import com.flux.calendar_service.calendar.AccessLevel;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDateTime;
 
+@Schema(description = "Calendar response with full details")
 public record CalendarResponse(
-        String id,
-        String userId,
-        String title,
-        String description,
-        String colorHex,
-        String timezone,
-        boolean isPrimary,
-        boolean isDeleted,
-        LocalDateTime createdAt,
-        LocalDateTime updatedAt
+        @Schema(description = "Unique calendar ID") String id,
+        @Schema(description = "Owner user ID") String userId,
+        @Schema(description = "Calendar title") String title,
+        @Schema(description = "Calendar description") String description,
+        @Schema(description = "Hex color code") String colorHex,
+        @Schema(description = "Timezone") String timezone,
+        @Schema(description = "Whether this is the primary calendar") boolean isPrimary,
+        @Schema(description = "Soft-delete flag") boolean isDeleted,
+        @Schema(description = "Creation timestamp") LocalDateTime createdAt,
+        @Schema(description = "Last update timestamp") LocalDateTime updatedAt
 ) {
 }

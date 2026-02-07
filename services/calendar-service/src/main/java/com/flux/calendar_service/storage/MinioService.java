@@ -55,7 +55,7 @@ public class MinioService {
     }
 
     public String getFileUrl(String fileName) {
-        return String.format("%s/%s/%s", "https://flux-minios3.onrender.com", bucketName, fileName);
+        return String.format("%s/%s/%s", "https://localhost:9000", bucketName, fileName);
     }
 
     public InputStream getFile(String fileName) {

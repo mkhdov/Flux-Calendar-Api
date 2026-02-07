@@ -29,8 +29,9 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          # Same realm as Gateway – this is important
-          issuer-uri: ${ISSUER_URL}
+         issuer-uri: ${ISSUER_URL}
+         jwk-set-uri: ${JWT_SET_URL}
+  
   mail:
     host: ${MAIL_HOST}
     port: ${MAIL_PORT}
@@ -86,6 +87,16 @@ minio:
   secret-key: ${MINIO_SECRET_KEY}
   bucket: ${MINIO_BUCKET}
 
+zoom:
+  client:
+    id: ${ZOOM_CLIENT_ID}
+    secret: ${ZOOM_CLIENT_SECRET}
+    redirect-uri: ${ZOOM_CLIENT_REDIRECT_URL}
+  api:
+    base-url: https://api.zoom.us/v2
+    token-url: https://zoom.us/oauth/token
+    auth-url: https://zoom.us/oauth/authorize
+
 eureka:
   client:
     service-url:
@@ -95,4 +106,6 @@ server:
   port: ${CALENDARS_PORT}
 
 app:
-  url: http://localhost:8083
+  jwt:
+    secret: ${JWT_SECRET}
+  url: ${APP_JWT_URL}

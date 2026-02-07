@@ -9,7 +9,8 @@ import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
 import com.flux.calendar_service.location.LocationMapper;
 import com.flux.calendar_service.member.MemberMapper;
-import com.flux.calendar_service.task.TaskMapper;
+import com.flux.calendar_service.note.NoteMapper;
+import com.flux.calendar_service.subtask.SubtaskMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -23,9 +24,10 @@ public class EventMapper {
     private final CalendarMapper calendarMapper;
     private final LocationMapper locationMapper;
     private final ConferenceMapper conferenceMapper;
-    private final TaskMapper taskMapper;
+    private final SubtaskMapper subtaskMapper;
     private final AttachmentMapper attachmentMapper;
     private final MemberMapper memberMapper;
+    private final NoteMapper noteMapper;
 
     public EventResponse toEventResponse(Event event) {
         if (event == null) {
@@ -46,8 +48,8 @@ public class EventMapper {
                 event.isAllDay(),
                 event.getSyncStatus(),
                 event.getStatus(),
-                event.getTasks() != null
-                        ? event.getTasks().stream().map(taskMapper::toTaskResponse).toList()
+                event.getSubtasks() != null
+                        ? event.getSubtasks().stream().map(subtaskMapper::toSubtaskResponse).toList()
                         : Collections.emptyList(),
 
                 event.getAttachments() != null
@@ -56,6 +58,9 @@ public class EventMapper {
 
                 event.getMembers() != null
                         ? event.getMembers().stream().map(memberMapper::toMemberResponse).toList()
+                        : Collections.emptyList(),
+                event.getNotes() != null
+                        ? event.getNotes().stream().map(noteMapper::toNoteResponse).toList()
                         : Collections.emptyList(),
                 event.getCreatedAt(),
                 event.getUpdatedAt());
@@ -79,7 +84,8 @@ public class EventMapper {
                 .syncStatus(SyncStatus.SYNCED)
                 .build();
 
-        event.setTasks(request.tasks() != null ? request.tasks().stream().map(t -> taskMapper.toTask(t, event)).toList()
+        event.setSubtasks(request.subtasks() != null
+                ? request.subtasks().stream().map(t -> subtaskMapper.toSubtask(t, event)).toList()
                 : new java.util.ArrayList<>());
         event.setAttachments(request.attachments() != null
                 ? request.attachments().stream().map(a -> attachmentMapper.toAttachment(a, event)).toList()

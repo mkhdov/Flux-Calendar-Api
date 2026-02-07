@@ -1,15 +1,14 @@
 package com.flux.calendar_service.member.dto;
 
-import com.flux.calendar_service.event.Event;
-import com.flux.calendar_service.event.dto.EventResponse;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDateTime;
 
+@Schema(description = "Event member response")
 public record MemberResponseDTO(
-        String id,
-        String email,
-        String fullName,
-        boolean isOwner,
-        LocalDateTime createdAt
-) {
+                @Schema(description = "Member ID") String id,
+                @Schema(description = "Member email") String email,
+                @Schema(description = "Full name") String fullName,
+                @Schema(description = "Whether this member is the event owner") boolean isOwner,
+                @Schema(description = "When the member was added") LocalDateTime createdAt) {
 }

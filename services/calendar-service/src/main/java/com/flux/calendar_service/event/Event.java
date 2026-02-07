@@ -4,8 +4,9 @@ import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.conference.Conference;
 import com.flux.calendar_service.location.Location;
 import com.flux.calendar_service.member.Member;
-import com.flux.calendar_service.task.Task;
+import com.flux.calendar_service.subtask.Subtask;
 import com.flux.calendar_service.attachment.Attachment;
+import com.flux.calendar_service.note.Note;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -34,6 +35,9 @@ public class Event {
     @Column(name = "google_calendar_id")
     private String googleCalendarId;
 
+    @Column(name = "google_updated_at")
+    private LocalDateTime googleUpdatedAt;
+
     @ManyToOne
     @JoinColumn(name = "calendar_id", nullable = false)
     private Calendar calendar;
@@ -49,7 +53,7 @@ public class Event {
 
     @Builder.Default
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
-    private List<Task> tasks = new ArrayList<>();
+    private List<Subtask> subtasks = new ArrayList<>();
 
     @Builder.Default
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
@@ -58,6 +62,10 @@ public class Event {
     @Builder.Default
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private List<Member> members = new ArrayList<>();
+
+    @Builder.Default
+    @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<Note> notes = new ArrayList<>();
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "location_id")

@@ -1,11 +1,14 @@
 package com.flux.calendar_service.task;
 
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 
-@Repository
 public interface TaskRepository extends JpaRepository<Task, String> {
-    List<Task> findAllByEventId(String eventId);
+    List<Task> findAllByCalendarId(String calendarId);
+
+    List<Task> findAllByCalendarIdAndDate(String calendarId, LocalDate date);
+
+    List<Task> findAllByCalendarIdAndStatus(String calendarId, TaskStatus status);
 }

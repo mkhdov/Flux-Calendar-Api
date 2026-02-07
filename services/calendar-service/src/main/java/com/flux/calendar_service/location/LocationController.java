@@ -7,6 +7,7 @@ import com.flux.calendar_service.location.dto.UpdateLocation;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +25,11 @@ public class LocationController {
         private final LocationService locationService;
 
         @Operation(summary = "Create a location for an event", description = "Creates a new location and associates it with a specific event")
-        @ApiResponse(responseCode = "201", description = "Location created successfully")
+        @ApiResponses(value = {
+                @ApiResponse(responseCode = "201", description = "Location created successfully"),
+                @ApiResponse(responseCode = "400", description = "Invalid request (e.g. missing place name)"),
+                @ApiResponse(responseCode = "404", description = "Event not found")
+        })
         @PostMapping("/{id}")
         public ResponseEntity<String> createLocation(
                         @Parameter(description = "ID of the event") @PathVariable("id") String id,
@@ -35,6 +40,10 @@ public class LocationController {
         }
 
         @Operation(summary = "Get map links for a location", description = "Generates external map links (Google, Yandex) for a specific location")
+        @ApiResponses(value = {
+                @ApiResponse(responseCode = "200", description = "Map links returned"),
+                @ApiResponse(responseCode = "404", description = "Location not found")
+        })
         @GetMapping("/maps/{id}")
         public ResponseEntity<OpenInMapResponse> openInMaps(
                         @Parameter(description = "ID of the location") @PathVariable String id) {
@@ -55,7 +64,10 @@ public class LocationController {
         }
 
         @Operation(summary = "Update a location", description = "Updates the details of an existing location")
-        @ApiResponse(responseCode = "202", description = "Location update accepted")
+        @ApiResponses(value = {
+                @ApiResponse(responseCode = "202", description = "Location update accepted"),
+                @ApiResponse(responseCode = "404", description = "Location not found")
+        })
         @PutMapping("/{id}")
         public ResponseEntity<?> update(@Parameter(description = "ID of the location") @PathVariable String id,
                         @RequestBody UpdateLocation request) {
@@ -66,7 +78,10 @@ public class LocationController {
         }
 
         @Operation(summary = "Delete a location", description = "Deletes an existing location")
-        @ApiResponse(responseCode = "202", description = "Location deletion accepted")
+        @ApiResponses(value = {
+                @ApiResponse(responseCode = "202", description = "Location deletion accepted"),
+                @ApiResponse(responseCode = "404", description = "Location not found")
+        })
         @DeleteMapping("/{id}")
         public ResponseEntity<?> delete(@Parameter(description = "ID of the location") @PathVariable String id) {
                 locationService.deleteLocation(id);

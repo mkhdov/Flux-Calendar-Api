@@ -76,7 +76,7 @@ public class MemberService {
 
         // Join URL (from conference)
         Conference conference = event.getConference();
-        String joinLink = joinUrl;
+        String joinLink = null;
         if (conference != null) {
             joinLink = conference.getMeetLink() != null
                     ? conference.getMeetLink()
@@ -92,7 +92,7 @@ public class MemberService {
         sb.append("<p>If you believe this invitation was sent in error, you may ignore this email.</p>");
 
         sb.append("<p>Best regards,<br>");
-        sb.append("Vpire Max<br>");
+        sb.append("Flux<br>");
         sb.append("Calendar Service Team</p>");
 
         return sb.toString();
