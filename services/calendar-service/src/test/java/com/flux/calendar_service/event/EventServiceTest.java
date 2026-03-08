@@ -59,7 +59,7 @@ class EventServiceTest {
         EventRequest request = new EventRequest(
                 "New Event", "Description", "#000000", EventType.MEETING, null,
                 LocalDateTime.now(), LocalDateTime.now().plusHours(1), false, EventStatus.NOTSTARTED,
-                Collections.emptyList(), Collections.emptyList());
+                Collections.emptyList(), Collections.emptyList(), null);
         Calendar calendar = new Calendar();
         calendar.setId("cal1");
         calendar.setUserId("user1");

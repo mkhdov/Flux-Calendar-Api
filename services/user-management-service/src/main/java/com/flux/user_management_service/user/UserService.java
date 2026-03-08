@@ -52,6 +52,13 @@ public class UserService {
                 .orElseThrow(() -> new UserNotFoundException("User not found!"));
     }
 
+    @Cacheable(value = "users", key = "'email:' + #email")
+    public UserResponse getUserByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .map(userMapper::toUserResponse)
+                .orElseThrow(() -> new UserNotFoundException("User not found!"));
+    }
+
     @CacheEvict(value = "users", allEntries = true)
     public void updateUser(String id, UserRequest request) {
         var user = userRepository.findById(id)

@@ -2,6 +2,7 @@ package com.flux.calendar_service.calendar;
 
 import com.flux.calendar_service.calendar.dto.CalendarRequest;
 import com.flux.calendar_service.calendar.dto.CalendarResponse;
+import com.flux.calendar_service.calendar.dto.PrimaryRequest;
 import com.flux.calendar_service.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -98,5 +99,39 @@ class CalendarServiceTest {
 
         assertTrue(calendar.isDeleted());
         verify(calendarRepository).save(calendar);
+    }
+
+    @Test
+    void makePrimary_ShouldClearOldAndSetNewPrimary() {
+        String userId = "user1";
+        String calendarId = "cal2";
+        PrimaryRequest request = new PrimaryRequest(userId);
+        Calendar target = new Calendar();
+        target.setId(calendarId);
+        target.setUserId(userId);
+        target.setDeleted(false);
+
+        when(calendarRepository.findByIdAndUserIdAndIsDeletedFalse(calendarId, userId))
+                .thenReturn(Optional.of(target));
+        doNothing().when(calendarRepository).clearPrimaryByUserId(userId);
+        doNothing().when(calendarRepository).setPrimaryForUserCalendar(calendarId, userId);
+
+        calendarService.makePrimary(calendarId, request);
+
+        verify(calendarRepository).clearPrimaryByUserId(userId);
+        verify(calendarRepository).setPrimaryForUserCalendar(calendarId, userId);
+    }
+
+    @Test
+    void makePrimary_ShouldThrowWhenCalendarDoesNotBelongToUser() {
+        String userId = "user1";
+        String calendarId = "missing";
+        PrimaryRequest request = new PrimaryRequest(userId);
+
+        when(calendarRepository.findByIdAndUserIdAndIsDeletedFalse(calendarId, userId)).thenReturn(Optional.empty());
+
+        assertThrows(ResourceNotFoundException.class, () -> calendarService.makePrimary(calendarId, request));
+        verify(calendarRepository, never()).clearPrimaryByUserId(anyString());
+        verify(calendarRepository, never()).setPrimaryForUserCalendar(anyString(), anyString());
     }
 }

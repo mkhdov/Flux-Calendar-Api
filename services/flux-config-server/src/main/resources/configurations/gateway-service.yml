@@ -8,14 +8,14 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          issuer-uri: ${ISSUER_URL}
-          jwk-set-uri: ${JWT_SET_URL}
+          issuer-uri: ${KEYCLOAK_ISSUER_URI}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI}
 
   cloud:
     gateway:
       discovery:
         locator:
-          enabled: true  # Enables discovery-based routing
+          enabled: true
           lower-case-service-id: true
       routes:
         - id: user-management-service-swagger
@@ -43,21 +43,22 @@ spring:
           filters:
             - StripPrefix=0
 
-# Eureka Client Configuration
 eureka:
   client:
-    register-with-eureka: true  # Register gateway itself
-    fetch-registry: true        # Fetch other services
+    register-with-eureka: true
+    fetch-registry: true
     service-url:
       defaultZone: ${EUREKA_SERVICE_URL}
   instance:
     instance-id: ${spring.application.name}:${spring.application.instance_id:${random.value}}
-    hostname: ${EUREKA_HOSTNAME}
+    hostname: ${GATEWAY_HOSTNAME}
     prefer-ip-address: false
     lease-renewal-interval-in-seconds: 30
     lease-expiration-duration-in-seconds: 90
+
 app:
   jwt:
     secret: ${JWT_SECRET}
+
 server:
   port: ${GATEWAY_PORT}

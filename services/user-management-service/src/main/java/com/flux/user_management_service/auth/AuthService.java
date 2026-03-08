@@ -53,7 +53,15 @@ class AuthService {
         user.setVerificationToken(token);
         user.setTokenExpiryDate(LocalDateTime.now().plusHours(24));
 
-        userRepository.save(user);
+        user = userRepository.save(user);
+
+        userProducer.sendUserEvent(com.flux.user_management_service.kafka.UserEvent.builder()
+                .userId(user.getId())
+                .email(user.getEmail())
+                .firstname(user.getFirstname())
+                .lastname(user.getLastname())
+                .type("CREATED")
+                .build());
 
         emailService.sendVerificationEmail(user);
 
@@ -78,7 +86,7 @@ class AuthService {
                 .email(user.getEmail())
                 .firstname(user.getFirstname())
                 .lastname(user.getLastname())
-                .type("CREATED")
+                .type("UPDATED")
                 .build());
 
         emailService.sendRegistrationSuccessEmail(user);

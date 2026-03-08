@@ -1,5 +1,9 @@
 package com.flux.calendar_service.event;
 
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.stream.Collectors;
+
 import com.flux.calendar_service.attachment.AttachmentMapper;
 import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.calendar.CalendarMapper;
@@ -11,12 +15,10 @@ import com.flux.calendar_service.location.LocationMapper;
 import com.flux.calendar_service.member.MemberMapper;
 import com.flux.calendar_service.note.NoteMapper;
 import com.flux.calendar_service.subtask.SubtaskMapper;
-import lombok.RequiredArgsConstructor;
+
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -74,22 +76,23 @@ public class EventMapper {
         Event event = Event.builder()
                 .calendar(calendar)
                 .title(request.title())
-                .description(request.description())
+                .description(request.description() != null ? request.description() : "")
                 .colorHex(request.colorHex())
                 .type(request.type())
                 .startTime(request.startTime())
                 .endTime(request.endTime())
                 .allDay(request.allDay())
                 .status(request.status())
-                .syncStatus(SyncStatus.SYNCED)
+                .syncStatus(SyncStatus.PENDING)
                 .build();
 
         event.setSubtasks(request.subtasks() != null
-                ? request.subtasks().stream().map(t -> subtaskMapper.toSubtask(t, event)).toList()
-                : new java.util.ArrayList<>());
+                ? request.subtasks().stream().map(t -> subtaskMapper.toSubtask(t, event)).collect(Collectors.toSet())
+                : new HashSet<>());
         event.setAttachments(request.attachments() != null
-                ? request.attachments().stream().map(a -> attachmentMapper.toAttachment(a, event)).toList()
-                : new java.util.ArrayList<>());
+                ? request.attachments().stream().map(a -> attachmentMapper.toAttachment(a, event))
+                        .collect(Collectors.toSet())
+                : new HashSet<>());
 
         return event;
     }

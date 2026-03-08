@@ -14,7 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -56,7 +56,7 @@ class MemberServiceTest {
                 .startTime(LocalDateTime.now().plusDays(1))
                 .endTime(LocalDateTime.now().plusDays(1).plusHours(1))
                 .allDay(false)
-                .members(new ArrayList<>())
+                .members(new HashSet<>())
                 .build();
 
         testMember = Member.builder()

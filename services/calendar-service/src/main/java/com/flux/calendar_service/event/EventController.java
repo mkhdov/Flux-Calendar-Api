@@ -79,15 +79,16 @@ public class EventController {
      * Get events by date range
      * GET /events/range?start=...&end=...
      */
-    @Operation(summary = "Get events by date range", description = "Retrieves events within a specific time range")
+    @Operation(summary = "Get events by date range", description = "Retrieves events within a specific time range for a given calendar")
     @ApiResponse(responseCode = "200", description = "List of events in the range (may be empty)")
     @GetMapping("/range")
     public ResponseEntity<List<EventResponse>> getEventsByDateRange(
+            @Parameter(description = "Calendar ID") @RequestParam String calendarId,
             @Parameter(description = "Start time (ISO format)") @RequestParam LocalDateTime start,
             @Parameter(description = "End time (ISO format)") @RequestParam LocalDateTime end) {
         return ResponseEntity
                 .status(HttpStatus.OK)
-                .body(eventService.getEventsByDateRange(start, end));
+                .body(eventService.getEventsByDateRange(calendarId, start, end));
     }
 
     /**

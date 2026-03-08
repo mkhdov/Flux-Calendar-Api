@@ -1,28 +1,29 @@
-server:
-  port: ${CONFIG_PORT}
 spring:
-  profiles:
-    active: native
-  security:
-    user:
-      name: ${CONFIG_USERNAME}
-      password: ${CONFIG_PASSWORD}
-  application:
-    name: FluxConfigService
-  cloud:
-    config:
-      server:
-        native:
-          search-locations: classpath:/configurations
+    profiles:
+        active: ${CONFIG_SERVER_PROFILE_ACTIVE}
+    security:
+        user:
+            name: ${CONFIG_USERNAME}
+            password: ${CONFIG_PASSWORD}
+    application:
+        name: ${CONFIG_SERVER_APP_NAME}
+    cloud:
+        config:
+            server:
+                native:
+                    search-locations: classpath:/configurations
+
+server:
+    port: ${CONFIG_PORT}
 
 management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info
-  endpoint:
+    endpoints:
+        web:
+            exposure:
+                include: health,info
+    endpoint:
+        health:
+            show-details: always
     health:
-      show-details: always
-  health:
-    defaults:
-      enabled: true
+        defaults:
+            enabled: true

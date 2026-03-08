@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: calendars-service
+  namespace: ${K8S_NAMESPACE}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: calendars-service
+  template:
+    metadata:
+      labels:
+        app: calendars-service
+    spec:
+      containers:
+        - name: calendars-service
+          image: ${CALENDAR_IMAGE}
+          ports:
+            - containerPort: 8082
+          env:
+            - name: CONFIG_URL
+              value: http://flux-config-server:8888
+          envFrom:
+            - configMapRef:
+                name: flux-app-config
+            - secretRef:
+                name: flux-app-secrets
+          startupProbe:
+            tcpSocket:
+              port: 8082
+            failureThreshold: 40
+            periodSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 8082
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8082
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 150m
+              memory: 384Mi
+            limits:
+              cpu: 700m
+              memory: 1.5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: calendars-service
+  namespace: ${K8S_NAMESPACE}
+spec:
+  selector:
+    app: calendars-service
+  ports:
+    - name: http
+      port: 8082
+      targetPort: 8082

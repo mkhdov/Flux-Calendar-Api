@@ -8,9 +8,11 @@ import com.flux.user_management_service.user.dto.ApiResponse;
 import com.flux.user_management_service.user.dto.AuthResponse;
 import com.flux.user_management_service.user.dto.LoginRequest;
 import com.flux.user_management_service.user.dto.SignUpRequest;
+import com.flux.user_management_service.kafka.UserEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -91,6 +93,8 @@ class AuthServiceTest {
     void registerUser_ShouldRegisterUser_WhenEmailDoesNotExist() {
         when(userRepository.existsByEmail(signUpRequest.getEmail())).thenReturn(false);
         when(passwordEncoder.encode(signUpRequest.getPassword())).thenReturn("encodedPassword");
+        user.setId("user-1");
+        when(userRepository.save(any(User.class))).thenReturn(user);
 
         ApiResponse response = authService.registerUser(signUpRequest);
 
@@ -98,6 +102,7 @@ class AuthServiceTest {
         assertEquals("User registered successfully. Please check your email to verify your account.",
                 response.getMessage());
         verify(userRepository).save(any(User.class));
+        verify(userProducer).sendUserEvent(any());
         verify(emailService).sendVerificationEmail(any(User.class));
     }
 
@@ -122,6 +127,7 @@ class AuthServiceTest {
 
     @Test
     void verifyEmail_ShouldVerifyUser_WhenTokenValid() {
+        user.setId("user-1");
         when(userRepository.findByVerificationToken("token")).thenReturn(Optional.of(user));
         when(userRepository.save(any(User.class))).thenReturn(user);
 
@@ -132,7 +138,9 @@ class AuthServiceTest {
         assertNull(user.getVerificationToken());
         assertNull(user.getTokenExpiryDate());
         verify(userRepository).save(user);
-        verify(userProducer).sendUserEvent(any());
+        ArgumentCaptor<UserEvent> eventCaptor = ArgumentCaptor.forClass(UserEvent.class);
+        verify(userProducer).sendUserEvent(eventCaptor.capture());
+        assertEquals("UPDATED", eventCaptor.getValue().getType());
         verify(emailService).sendRegistrationSuccessEmail(user);
     }
 

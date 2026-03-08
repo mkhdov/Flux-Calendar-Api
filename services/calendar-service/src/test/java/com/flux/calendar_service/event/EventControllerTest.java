@@ -40,7 +40,7 @@ class EventControllerTest {
                 EventRequest request = new EventRequest(
                                 "New Event", "Description", "#000000", EventType.MEETING, null,
                                 LocalDateTime.now(), LocalDateTime.now().plusHours(1), false, EventStatus.NOTSTARTED,
-                                Collections.emptyList(), Collections.emptyList());
+                                Collections.emptyList(), Collections.emptyList(), null);
 
                 when(eventService.createEvent(eq(calendarId), any(EventRequest.class))).thenReturn("event1");
 
@@ -54,20 +54,31 @@ class EventControllerTest {
         @Test
         void getEventsByDateRange_ShouldReturnList() throws Exception {
                 EventResponse response = new EventResponse(
-                                "1", null, "Event 1", "Desc", "#000", null, null,
-                                EventType.MEETING, LocalDateTime.now(), LocalDateTime.now().plusHours(1),
-                                false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
-                                Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
-                                Collections.emptyList(),
-                                LocalDateTime.now(), LocalDateTime.now());
+                        "1", null, "Event 1", "Desc", "#000", null, null,
+                        EventType.MEETING, LocalDateTime.now(), LocalDateTime.now().plusHours(1),
+                        false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
+                        Collections.emptyList(),
+                        LocalDateTime.now(), LocalDateTime.now());
 
-                when(eventService.getEventsByDateRange(any(), any())).thenReturn(List.of(response));
+                when(eventService.getEventsByDateRange(any(), any(), any())).thenReturn(List.of(response));
 
                 mockMvc.perform(get("/events/range")
+                                .param("calendarId", "1")
                                 .param("start", LocalDateTime.now().toString())
                                 .param("end", LocalDateTime.now().plusDays(1).toString()))
-                                .andExpect(status().isOk())
-                                .andExpect(jsonPath("$[0].id").value("1"));
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$[0].id").value("1"));
+        }
+
+        @Test
+        void getEventsByDateRange_WithInvalidStart_ShouldReturnBadRequest() throws Exception {
+                mockMvc.perform(get("/events/range")
+                                .param("calendarId", "1")
+                                .param("start", "NaN-NaN-NaNTNaN:NaN:NaN")
+                                .param("end", LocalDateTime.now().plusDays(1).toString()))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.errors.start").exists());
         }
 
         @Test

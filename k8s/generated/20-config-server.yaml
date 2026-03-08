@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flux-config-server
+  namespace: flux
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flux-config-server
+  template:
+    metadata:
+      labels:
+        app: flux-config-server
+    spec:
+      containers:
+        - name: flux-config-server
+          image: test/config:1
+          ports:
+            - containerPort: 8888
+          envFrom:
+            - configMapRef:
+                name: flux-app-config
+            - secretRef:
+                name: flux-app-secrets
+          startupProbe:
+            tcpSocket:
+              port: 8888
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flux-config-server
+  namespace: flux
+spec:
+  selector:
+    app: flux-config-server
+  ports:
+    - name: http
+      port: 8888
+      targetPort: 8888

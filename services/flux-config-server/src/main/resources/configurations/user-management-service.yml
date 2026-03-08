@@ -8,10 +8,10 @@ spring:
       maximum-pool-size: 5
 
   security:
+    resourceserver:
+      jwt:
+        jwk-set-uri: ${KEYCLOAK_JWK_SET_URI}
 
-      resourceserver:
-        jwt:
-          jwk-set-uri: ${JWT_SET_URL}
   jpa:
     hibernate:
       ddl-auto: none

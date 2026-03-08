@@ -89,7 +89,12 @@ class LocationServiceTest {
         verify(googleCalendarApiService).updateEventLocation(
                 eq("user-123"),
                 eq("google-event-123"),
-                contains("Office, 123 Street, New York, USA")
+                argThat(location ->
+                        location.getPlaceName().equals("Office") &&
+                                location.getStreetAddress().equals("123 Street") &&
+                                location.getCity().equals("New York") &&
+                                location.getCountry().equals("USA")
+                )
         );
     }
 

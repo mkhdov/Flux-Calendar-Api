@@ -8,6 +8,7 @@ import com.flux.calendar_service.exception.*;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -146,35 +147,17 @@ public class CalendarService {
         return output;
     }
 
+    @Transactional
     public void makePrimary(String id, PrimaryRequest request) {
-        List<Calendar> calendars = calendarRepository.findCalendarByUserId(request.userId());
-        boolean isCalendarActive = false;
-        if (calendars.isEmpty()) {
-            throw new ResourceNotFoundException("Calendars by this user is not found!");
+        if (id == null || id.isBlank() || request.userId() == null || request.userId().isBlank()) {
+            throw new EmptyFieldException("Calendar id and user id cannot be empty!");
         }
 
-        for (Calendar calendar : calendars) {
-            if (calendar.getId().equals(id)) {
-                isCalendarActive = true;
-                break;
-            }
-        }
+        calendarRepository.findByIdAndUserIdAndIsDeletedFalse(id, request.userId())
+                .orElseThrow(() -> new ResourceNotFoundException("The calendar with this id is not found in this user!"));
 
-        if (!isCalendarActive) {
-            throw new ResourceNotFoundException("The calendar with this id is not found in this user!");
-        }
-
-        for (Calendar calendar : calendars) {
-            if (calendar.isPrimary()) {
-                calendar.setPrimary(false);
-                calendarRepository.save(calendar);
-            }
-            if (calendar.getId().equals(id)) {
-                calendar.setPrimary(true);
-                calendarRepository.save(calendar);
-                break;
-            }
-        }
+        calendarRepository.clearPrimaryByUserId(request.userId());
+        calendarRepository.setPrimaryForUserCalendar(id, request.userId());
     }
 
     public void updateCalendar(String id, CalendarUpdateRequest request) {

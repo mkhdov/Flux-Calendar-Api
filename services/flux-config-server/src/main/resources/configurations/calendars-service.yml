@@ -3,6 +3,7 @@ spring:
     multipart:
       max-file-size: 100MB
       max-request-size: 100MB
+
   datasource:
     url: ${CALENDAR_PGURL}
     username: ${CALENDAR_PGUSER}
@@ -10,15 +11,17 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5
+
   redis:
     host: ${REDIS_HOST}
     port: ${REDIS_PORT}
-    database: 0
-    timeout: 2000ms
+    database: ${REDIS_DATABASE}
+    timeout: ${REDIS_TIMEOUT}
     lettuce:
       pool:
         max-active: 8
         max-idle: 8
+
   jpa:
     hibernate:
       ddl-auto: none
@@ -29,9 +32,9 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-         issuer-uri: ${ISSUER_URL}
-         jwk-set-uri: ${JWT_SET_URL}
-  
+          issuer-uri: ${KEYCLOAK_ISSUER_URI}
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI}
+
   mail:
     host: ${MAIL_HOST}
     port: ${MAIL_PORT}
@@ -56,6 +59,7 @@ spring:
     url: ${CALENDAR_PGURL}
     user: ${CALENDAR_PGUSER}
     password: ${CALENDAR_PGPASSWORD}
+
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
     consumer:
@@ -72,14 +76,14 @@ spring:
 
 google:
   calendar:
-    enabled: true
+    enabled: ${GOOGLE_CALENDAR_ENABLED}
     client-id: ${GOOGLE_CLIENT_ID}
     client-secret: ${GOOGLE_CLIENT_SECRET}
     redirect-uri: ${GOOGLE_REDIRECT_URI}
     scope:
       - https://www.googleapis.com/auth/calendar
-    application-name: Calendar Sync App
-    calendar-id: primary
+    application-name: ${GOOGLE_APPLICATION_NAME}
+    calendar-id: ${GOOGLE_CALENDAR_ID}
 
 minio:
   endpoint: ${MINIO_ENDPOINT}
@@ -91,11 +95,11 @@ zoom:
   client:
     id: ${ZOOM_CLIENT_ID}
     secret: ${ZOOM_CLIENT_SECRET}
-    redirect-uri: ${ZOOM_CLIENT_REDIRECT_URL}
+    redirect-uri: ${ZOOM_REDIRECT_URI}
   api:
-    base-url: https://api.zoom.us/v2
-    token-url: https://zoom.us/oauth/token
-    auth-url: https://zoom.us/oauth/authorize
+    base-url: ${ZOOM_API_BASE_URL}
+    token-url: ${ZOOM_TOKEN_URL}
+    auth-url: ${ZOOM_AUTH_URL}
 
 eureka:
   client:

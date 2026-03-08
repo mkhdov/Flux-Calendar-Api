@@ -1,5 +1,12 @@
 package com.flux.calendar_service.event;
 
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.stream.Collectors;
+
 import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.calendar.CalendarRepository;
 import com.flux.calendar_service.conference.Conference;
@@ -8,25 +15,30 @@ import com.flux.calendar_service.conference.ConferenceRepository;
 import com.flux.calendar_service.event.dto.EventRequest;
 import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
+import com.flux.calendar_service.exception.ConflictException;
+import com.flux.calendar_service.exception.EmptyFieldException;
+import com.flux.calendar_service.exception.GoogleTokenRevokedException;
+import com.flux.calendar_service.exception.InvalidOperationException;
+import com.flux.calendar_service.exception.InvalidTimeRangeException;
+import com.flux.calendar_service.exception.ResourceNotFoundException;
+import com.flux.calendar_service.exception.ServiceUnavailableException;
+import com.flux.calendar_service.exception.ZoomException;
+import com.flux.calendar_service.google.GoogleAuthService;
 import com.flux.calendar_service.google.GoogleCalendarApiService;
 import com.flux.calendar_service.location.Location;
 import com.flux.calendar_service.location.LocationMapper;
 import com.flux.calendar_service.location.LocationRepository;
-import com.flux.calendar_service.exception.*;
+import com.flux.calendar_service.location.LocationService;
 import com.flux.calendar_service.member.Member;
 import com.flux.calendar_service.member.MemberRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -40,9 +52,13 @@ public class EventService {
     private final ConferenceRepository conferenceRepository;
     private final ConferenceMapper conferenceMapper;
     private final MemberRepository memberRepository;
+    private final LocationService locationService;
 
     @Autowired(required = false)
     private GoogleCalendarApiService googleCalendarApiService;
+
+    @Autowired(required = false)
+    private GoogleAuthService googleAuthService;
 
     @Autowired(required = false)
     private com.flux.calendar_service.zoom.ZoomMeetingService zoomMeetingService;
@@ -70,18 +86,28 @@ public class EventService {
 
         // Create event
         Event event = eventMapper.toEvent(request, calendar);
+        normalizeAllDayEventTimes(event, request);
 
-        // Save event first to get the ID
         if (event.getSubtasks() != null) {
             event.getSubtasks().forEach(subtask -> subtask.setEvent(event));
         }
         if (event.getAttachments() != null) {
             event.getAttachments().forEach(attachment -> attachment.setEvent(event));
         }
+
+        // Save event first so it gets a generated UUID before we reference
+        // event.getId()
         Event savedEvent = eventRepository.save(event);
 
+        // Attach location after save (locationService.create needs a valid event ID)
+        if (request.location() != null) {
+            Location location = locationService.create(savedEvent.getId(), request.location());
+            savedEvent.setLocation(location);
+            savedEvent = eventRepository.save(savedEvent);
+        }
+
         // Sync with Google Calendar if enabled
-        if (googleCalendarApiService != null) {
+        if (shouldSyncToGoogle(calendar)) {
             try {
                 com.google.api.services.calendar.model.Event googleEvent;
                 String userId = calendar.getUserId();
@@ -92,6 +118,7 @@ public class EventService {
                             userId,
                             savedEvent.getTitle(),
                             savedEvent.getDescription(),
+                            savedEvent.getLocation(),
                             savedEvent.getStartTime());
                 } else {
                     // Create simple event
@@ -99,6 +126,7 @@ public class EventService {
                             userId,
                             savedEvent.getTitle(),
                             savedEvent.getDescription(),
+                            savedEvent.getLocation(),
                             savedEvent.getStartTime(),
                             savedEvent.getEndTime(),
                             savedEvent.getType().toString());
@@ -112,12 +140,31 @@ public class EventService {
                 log.info("Event created and synced to Google Calendar. Event ID: {}, Google Calendar ID: {}",
                         savedEvent.getId(), googleEvent.getId());
             } catch (IOException e) {
-                log.error("Failed to sync event to Google Calendar. Event ID: {}", savedEvent.getId(), e);
-                savedEvent.setSyncStatus(SyncStatus.PENDING);
+                if (GoogleAuthService.isInvalidGrant(e)) {
+                    // User's token is permanently revoked — mark disconnected and tag event
+                    log.error("Google token revoked while creating event for user {}. "
+                            + "Event saved locally. Event ID: {}", calendar.getUserId(), savedEvent.getId());
+                    if (googleAuthService != null) {
+                        googleAuthService.markUserAsDisconnected(calendar.getUserId());
+                    }
+                    savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
+                } else {
+                    log.error("Transient Google sync failure for event: {}. Will retry.", savedEvent.getId(), e);
+                    savedEvent.setSyncStatus(SyncStatus.PENDING);
+                }
                 eventRepository.save(savedEvent);
             }
         } else {
-            log.debug("Google Calendar integration is disabled. Event created locally only.");
+            if (googleAuthService != null && !googleAuthService.isGoogleConnected(calendar.getUserId())
+                    && calendar.getGoogleCalendarId() != null && !calendar.getGoogleCalendarId().isBlank()) {
+                log.warn(
+                        "Event {} not synced due to AUTH_ERROR. Google auth is disconnected for user {}. Calendar ID: {}",
+                        savedEvent.getId(), calendar.getUserId(), calendar.getId());
+                savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
+                eventRepository.save(savedEvent);
+            } else {
+                log.debug("Event created locally without Google sync. Calendar ID: {}", calendar.getId());
+            }
         }
         Member member = Member.builder()
                 .fullName("Owner")
@@ -152,6 +199,7 @@ public class EventService {
 
         // 3️⃣ Create & save local event
         Event event = eventMapper.toEvent(request, calendar);
+        normalizeAllDayEventTimes(event, request);
         if (event.getSubtasks() != null) {
             event.getSubtasks().forEach(subtask -> subtask.setEvent(event));
         }
@@ -161,91 +209,112 @@ public class EventService {
         Event savedEvent = eventRepository.save(event);
 
         // 4️⃣ Google sync (optional)
+        // Google Meet events should sync even when created from a non-dedicated
+        // calendar.
         if (googleCalendarApiService == null) {
-            log.debug("Google Calendar integration disabled. Event created locally only.");
+            log.debug("Event created locally without Google sync. Calendar ID: {}", calendar.getId());
             return savedEvent.getId();
         }
 
-        try {
-            String userId = calendar.getUserId();
-            com.google.api.services.calendar.model.Event googleEvent;
+        if (googleAuthService != null && !googleAuthService.isGoogleConnected(calendar.getUserId())) {
+            log.warn("Event {} not synced due to AUTH_ERROR. Google auth is disconnected for user {}.",
+                    savedEvent.getId(), calendar.getUserId());
+            savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
+            eventRepository.save(savedEvent);
+        } else {
+            try {
+                String userId = calendar.getUserId();
+                com.google.api.services.calendar.model.Event googleEvent;
 
-            if (savedEvent.isAllDay()) {
-                // ✔ All-day → NO Meet
-                googleEvent = googleCalendarApiService.createAllDayEvent(
-                        userId,
-                        savedEvent.getTitle(),
-                        savedEvent.getDescription(),
-                        savedEvent.getStartTime());
-            } else {
-                // ✔ Timed → WITH Meet
-                googleEvent = googleCalendarApiService.createEventWithGoogleMeet(
-                        userId,
-                        savedEvent.getTitle(),
-                        savedEvent.getDescription(),
-                        savedEvent.getStartTime(),
-                        savedEvent.getEndTime(),
-                        savedEvent.getType().toString());
-            }
+                if (savedEvent.isAllDay()) {
+                    googleEvent = googleCalendarApiService.createAllDayEventWithGoogleMeet(
+                            userId,
+                            savedEvent.getTitle(),
+                            savedEvent.getDescription(),
+                            savedEvent.getStartTime());
+                } else {
+                    // ✔ Timed → WITH Meet
+                    googleEvent = googleCalendarApiService.createEventWithGoogleMeet(
+                            userId,
+                            savedEvent.getTitle(),
+                            savedEvent.getDescription(),
+                            savedEvent.getLocation(),
+                            savedEvent.getStartTime(),
+                            savedEvent.getEndTime(),
+                            savedEvent.getType().toString());
+                }
 
-            // 5️⃣ Extract Meet details (timed events only)
-            String googleConferenceId = null;
-            String meetLink = null;
-            String meetingCode = null;
-            String phoneNumber = null;
-            String pin = null;
+                // 5️⃣ Extract Meet details if present
+                String googleConferenceId = null;
+                String meetLink = null;
+                String meetingCode = null;
+                String phoneNumber = null;
+                String pin = null;
 
-            if (!savedEvent.isAllDay() && googleEvent.getConferenceData() != null) {
-                com.google.api.services.calendar.model.ConferenceData confData = googleEvent.getConferenceData();
-                googleConferenceId = confData.getConferenceId();
+                if (googleEvent.getConferenceData() != null) {
+                    com.google.api.services.calendar.model.ConferenceData confData = googleEvent.getConferenceData();
+                    googleConferenceId = confData.getConferenceId();
 
-                if (confData.getEntryPoints() != null) {
-                    for (com.google.api.services.calendar.model.EntryPoint entry : confData.getEntryPoints()) {
-                        if ("video".equals(entry.getEntryPointType())) {
-                            meetLink = entry.getUri();
-                            if (meetLink != null && meetLink.contains("/")) {
-                                meetingCode = meetLink.substring(meetLink.lastIndexOf("/") + 1);
+                    if (confData.getEntryPoints() != null) {
+                        for (com.google.api.services.calendar.model.EntryPoint entry : confData.getEntryPoints()) {
+                            if ("video".equals(entry.getEntryPointType())) {
+                                meetLink = entry.getUri();
+                                if (meetLink != null && meetLink.contains("/")) {
+                                    meetingCode = meetLink.substring(meetLink.lastIndexOf("/") + 1);
+                                }
+                            } else if ("phone".equals(entry.getEntryPointType())) {
+                                phoneNumber = entry.getUri();
+                                pin = entry.getPin();
                             }
-                        } else if ("phone".equals(entry.getEntryPointType())) {
-                            phoneNumber = entry.getUri();
-                            pin = entry.getPin();
                         }
                     }
                 }
+
+                // 6️⃣ Update and save local event (cascade will save conference)
+                savedEvent.setGoogleCalendarId(googleEvent.getId());
+                savedEvent.setSyncStatus(SyncStatus.SYNCED);
+                if (googleConferenceId != null || meetLink != null || meetingCode != null || phoneNumber != null
+                        || pin != null) {
+                    Conference conference = Conference.builder()
+                            .type(Conference.ConferenceType.GOOGLE_MEET)
+                            .googleConferenceId(googleConferenceId)
+                            .meetLink(meetLink)
+                            .meetingCode(meetingCode)
+                            .phoneNumber(phoneNumber)
+                            .pin(pin)
+                            .conferenceLink(meetLink)
+                            .syncStatus(Conference.SyncStatus.SYNCED)
+                            .lastSynced(LocalDateTime.now())
+                            .event(savedEvent)
+                            .build();
+                    savedEvent.setConference(conference);
+                } else {
+                    savedEvent.setConference(null);
+                }
+
+                eventRepository.save(savedEvent);
+
+                log.info(
+                        "Event synced. Local ID: {}, Google ID: {}, Meet: {}",
+                        savedEvent.getId(),
+                        googleEvent.getId(),
+                        meetLink);
+
+            } catch (IOException e) {
+                if (GoogleAuthService.isInvalidGrant(e)) {
+                    log.error("Google token revoked while creating meet event for user {}. Event ID: {}",
+                            calendar.getUserId(), savedEvent.getId());
+                    if (googleAuthService != null) {
+                        googleAuthService.markUserAsDisconnected(calendar.getUserId());
+                    }
+                    savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
+                } else {
+                    log.error("Failed to sync event to Google Calendar. Event ID: {}",
+                            savedEvent.getId(), e);
+                    savedEvent.setSyncStatus(SyncStatus.PENDING);
+                }
+                eventRepository.save(savedEvent);
             }
-
-            Conference conference = Conference.builder()
-                    .type(Conference.ConferenceType.GOOGLE_MEET)
-                    .googleConferenceId(googleConferenceId)
-                    .meetLink(meetLink)
-                    .meetingCode(meetingCode)
-                    .phoneNumber(phoneNumber)
-                    .pin(pin)
-                    .conferenceLink(meetLink)
-                    .syncStatus(Conference.SyncStatus.SYNCED)
-                    .lastSynced(LocalDateTime.now())
-                    .event(savedEvent)
-                    .build();
-
-            // 6️⃣ Update and save local event (cascade will save conference)
-            savedEvent.setGoogleCalendarId(googleEvent.getId());
-            savedEvent.setSyncStatus(SyncStatus.SYNCED);
-            savedEvent.setConference(conference);
-
-            eventRepository.save(savedEvent);
-
-            log.info(
-                    "Event synced. Local ID: {}, Google ID: {}, Meet: {}",
-                    savedEvent.getId(),
-                    googleEvent.getId(),
-                    meetLink);
-
-        } catch (IOException e) {
-            log.error("Failed to sync event to Google Calendar. Event ID: {}",
-                    savedEvent.getId(), e);
-
-            savedEvent.setSyncStatus(SyncStatus.PENDING);
-            eventRepository.save(savedEvent);
         }
 
         Member member = Member.builder()
@@ -354,7 +423,7 @@ public class EventService {
             return;
         }
 
-        if (googleCalendarApiService != null && event.getGoogleCalendarId() != null) {
+        if (shouldSyncExistingGoogleEvent(event)) {
             try {
                 // We don't have a direct 'removeMeet' in ApiService, but we can update the
                 // event with null conferenceData
@@ -419,7 +488,17 @@ public class EventService {
         if (event.getAttachments() != null) {
             event.getAttachments().forEach(attachment -> attachment.setEvent(event));
         }
+
+        // Save event first so it gets a generated UUID before we reference
+        // event.getId()
         Event savedEvent = eventRepository.save(event);
+
+        // Attach location after save (locationService.create needs a valid event ID)
+        if (request.location() != null) {
+            Location location = locationService.create(savedEvent.getId(), request.location());
+            savedEvent.setLocation(location);
+            savedEvent = eventRepository.save(savedEvent);
+        }
 
         // 4️⃣ Create Zoom meeting (Best effort)
         Conference zoomConference = null;
@@ -438,36 +517,56 @@ public class EventService {
         }
 
         // 5️⃣ Sync with Google Calendar (if enabled)
-        if (googleCalendarApiService != null) {
+        if (shouldSyncToGoogle(calendar)) {
             try {
-                String description = savedEvent.getDescription();
+                StringBuilder description = new StringBuilder();
+                description.append(savedEvent.getDescription());
                 if (zoomConference != null) {
-                    description = (description != null ? description : "") + "\n\nZoom Meeting: "
-                            + zoomConference.getConferenceLink();
+                    description.append("\n\nZoom Meeting: ").append(zoomConference.getConferenceLink());
                 }
 
                 com.google.api.services.calendar.model.Event googleEvent = googleCalendarApiService.createEvent(
                         userId,
                         savedEvent.getTitle(),
-                        description,
+                        description.toString(),
+                        event.getLocation(),
                         savedEvent.getStartTime(),
                         savedEvent.getEndTime(),
                         savedEvent.getType().toString());
 
                 savedEvent.setGoogleCalendarId(googleEvent.getId());
                 savedEvent.setSyncStatus(SyncStatus.SYNCED);
+                savedEvent.setDescription(description.toString());
                 eventRepository.save(savedEvent);
 
                 log.info("Event synced to Google Calendar. Event ID: {}, Google ID: {}", savedEvent.getId(),
                         googleEvent.getId());
             } catch (IOException e) {
-                log.error("Failed to sync event to Google Calendar for event {}: {}", savedEvent.getId(),
-                        e.getMessage());
-                savedEvent.setSyncStatus(SyncStatus.PENDING);
+                if (GoogleAuthService.isInvalidGrant(e)) {
+                    log.error("Google token revoked while creating zoom event for user {}. Event ID: {}", userId,
+                            savedEvent.getId());
+                    if (googleAuthService != null) {
+                        googleAuthService.markUserAsDisconnected(userId);
+                    }
+                    savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
+                } else {
+                    log.error("Failed to sync event to Google Calendar for event {}: {}", savedEvent.getId(),
+                            e.getMessage());
+                    savedEvent.setSyncStatus(SyncStatus.PENDING);
+                }
                 eventRepository.save(savedEvent);
             }
         } else {
-            log.debug("Google Calendar integration is disabled.");
+            if (googleAuthService != null && !googleAuthService.isGoogleConnected(calendar.getUserId())
+                    && calendar.getGoogleCalendarId() != null && !calendar.getGoogleCalendarId().isBlank()) {
+                log.warn(
+                        "Event {} not synced due to AUTH_ERROR. Google auth is disconnected for user {}. Calendar ID: {}",
+                        savedEvent.getId(), calendar.getUserId(), calendar.getId());
+                savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
+                eventRepository.save(savedEvent);
+            } else {
+                log.debug("Event created locally without Google sync. Calendar ID: {}", calendar.getId());
+            }
         }
 
         // 6️⃣ Create owner member
@@ -506,25 +605,40 @@ public class EventService {
         try {
             Conference conference = zoomMeetingService.createZoomMeeting(event.getId(), userId);
             event.setConference(conference);
-            eventRepository.save(event);
 
             log.info("Zoom meeting added to event. Event ID: {}, Zoom Meeting ID: {}",
                     event.getId(), conference.getZoomMeetingId());
 
             // Sync with Google Calendar if enabled
-            if (googleCalendarApiService != null && event.getGoogleCalendarId() != null) {
-                String description = event.getDescription() + "\n\nZoom Meeting: " + conference.getConferenceLink();
+            if (shouldSyncExistingGoogleEvent(event)) {
+                StringBuilder description = new StringBuilder();
+                description.append(event.getDescription()).append("\n\nZoom Meeting: ").append(conference.getConferenceLink());
                 googleCalendarApiService.updateEvent(
                         event.getCalendar().getUserId(),
                         event.getGoogleCalendarId(),
                         event.getTitle(),
-                        description);
+                        description.toString());
+                event.setDescription(description.toString());
             }
+            eventRepository.save(event);
 
         } catch (Exception e) {
             log.error("Failed to add Zoom meeting to event. Event ID: {}", event.getId(), e);
             throw new ServiceUnavailableException("Failed to add Zoom meeting", e);
         }
+    }
+    /**
+     * Removes only the Zoom meeting link portion appended during creation.
+     * Leaves the rest of the user's original description intact.
+     *
+     * Pattern matched: "\n\nZoom Meeting: <link>"
+     */
+    private String removeZoomLinkFromDescription(String description) {
+        if (description == null || description.isBlank()) {
+            return description;
+        }
+        // Removes the exact block appended in createEventWithZoom()
+        return description.replaceAll("\\n\\nZoom Meeting: https?://\\S+", "").stripTrailing();
     }
 
     @Transactional
@@ -537,47 +651,55 @@ public class EventService {
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
 
         if (event.getConference() == null) {
-            return; // No conference to remove
+            return;
         }
 
         if (!Conference.ConferenceType.ZOOM.equals(event.getConference().getType())) {
             throw new InvalidOperationException("Event does not have a Zoom meeting");
         }
 
+        // 1️⃣ Delete from Zoom servers
         if (zoomMeetingService != null) {
             try {
                 zoomMeetingService.deleteZoomMeeting(event.getId(), userId);
-                log.info("Zoom meeting removed from event. Event ID: {}", id);
+                log.info("Zoom meeting removed from Zoom servers. Event ID: {}", id);
             } catch (Exception e) {
                 log.error("Failed to remove Zoom meeting from Zoom servers. Event ID: {}", event.getId(), e);
-                // Continue with local deletion even if Zoom deletion fails
+                throw new ZoomException(e.getMessage());
             }
         }
 
-        // Sync with Google Calendar to remove Zoom details
-        if (googleCalendarApiService != null && event.getGoogleCalendarId() != null) {
+        // 2️⃣ Clean Zoom link from description, preserve user's original text
+        String cleanedDescription = removeZoomLinkFromDescription(event.getDescription());
+
+        // 3️⃣ Update local event — clear conference and fix description
+        event.setConference(null);
+        event.setDescription(cleanedDescription);
+        eventRepository.save(event);
+
+        // 4️⃣ Sync cleaned description to Google Calendar
+        if (shouldSyncExistingGoogleEvent(event)) {
             try {
-                // Restore original description (without Zoom link)
                 googleCalendarApiService.updateEvent(
                         event.getCalendar().getUserId(),
                         event.getGoogleCalendarId(),
                         event.getTitle(),
-                        event.getDescription());
+                        cleanedDescription);  // ✅ cleaned, not raw event.getDescription()
+                log.info("Google Calendar updated after Zoom removal. Event ID: {}", id);
             } catch (IOException e) {
-                log.error("Failed to update Google Calendar event after removing Zoom. Event ID: {}", event.getId(), e);
+                if (GoogleAuthService.isInvalidGrant(e)) {
+                    log.error("Google token revoked while removing Zoom link for user {}", userId);
+                    if (googleAuthService != null) googleAuthService.markUserAsDisconnected(userId);
+                    event.setSyncStatus(SyncStatus.AUTH_ERROR);
+                } else {
+                    log.error("Failed to update Google Calendar after removing Zoom. Event ID: {}", event.getId(), e);
+                    event.setSyncStatus(SyncStatus.PENDING);
+                }
+                eventRepository.save(event);
             }
         }
 
-        // Remove conference locally (already deleted by ZoomMeetingService)
-        // Just log the completion
-        log.info("Zoom meeting removed from event locally. Event ID: {}", id);
-    }
-
-    public List<EventResponse> getAllEvents() {
-        return eventRepository.findAll()
-                .stream()
-                .map(eventMapper::toEventResponse)
-                .collect(Collectors.toList());
+        log.info("Zoom meeting fully removed from event. Event ID: {}", id);
     }
 
     public EventResponse getEventById(String id) {
@@ -631,14 +753,14 @@ public class EventService {
         return userEvents;
     }
 
-    public List<EventResponse> getEventsByDateRange(LocalDateTime start, LocalDateTime end) {
+    public List<EventResponse> getEventsByDateRange(String calendarId, LocalDateTime start, LocalDateTime end) {
         if (start == null || end == null) {
             throw new EmptyFieldException("Start and end dates cannot be null");
         }
         if (end.isBefore(start)) {
             throw new InvalidTimeRangeException("End date cannot be before start date");
         }
-        return eventRepository.findByStartTimeBetween(start, end)
+        return eventRepository.findEventsWithRelations(calendarId, start, end)
                 .stream()
                 .map(eventMapper::toEventResponse)
                 .collect(Collectors.toList());
@@ -701,7 +823,7 @@ public class EventService {
         eventRepository.save(event);
 
         // Sync with Google Calendar if event is already synced and service is available
-        if (googleCalendarApiService != null && event.getGoogleCalendarId() != null) {
+        if (shouldSyncExistingGoogleEvent(event)) {
             try {
                 String locationName = event.getLocation() != null ? event.getLocation().getPlaceName() : null;
                 String userId = event.getCalendar().getUserId();
@@ -740,7 +862,7 @@ public class EventService {
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
 
         // Delete from Google Calendar if synced and service is available
-        if (googleCalendarApiService != null && event.getGoogleCalendarId() != null) {
+        if (shouldSyncExistingGoogleEvent(event)) {
             try {
                 String userId = event.getCalendar().getUserId();
                 googleCalendarApiService.deleteEvent(userId, event.getGoogleCalendarId());
@@ -849,7 +971,21 @@ public class EventService {
             calendarRepository.save(calendar);
 
         } catch (IOException e) {
-            log.error("Failed to sync events from Google Calendar for user: {}", userId, e);
+            if (GoogleAuthService.isInvalidGrant(e)) {
+                // Terminal — the refresh token was permanently revoked.
+                // Mark the user disconnected so the scheduler stops retrying.
+                log.error("Google token permanently revoked for user {} during sync. "
+                        + "User must re-authorize. Calendar ID: {}", userId, calendarId);
+                if (googleAuthService != null) {
+                    googleAuthService.markUserAsDisconnected(userId);
+                }
+                // Propagate as GoogleTokenRevokedException so the scheduler
+                // can catch it specifically and continue with other users.
+                throw new GoogleTokenRevokedException(userId, e);
+            }
+            // Transient failure — let the scheduler log it and retry next cycle.
+            log.error("Transient Google Calendar sync failure for user: {}, calendar: {}",
+                    userId, calendarId, e);
             throw new ServiceUnavailableException("Failed to sync from Google Calendar", e);
         }
     }
@@ -893,7 +1029,7 @@ public class EventService {
     private void updateEventFieldsFromGoogle(Event event, com.google.api.services.calendar.model.Event googleEvent) {
         event.setTitle(googleEvent.getSummary() != null ? googleEvent.getSummary() : "(No Title)");
         event.setDescription(googleEvent.getDescription() != null ? googleEvent.getDescription() : "");
-        event.setColorHex("#3788d8"); // Google Blue default
+        event.setColorHex("#3788d8"); // fallback when no Google color is available
         event.setType(EventType.OTHERS); // Default
 
         // Try to map color ID to type if possible, or just leave as OTHERS
@@ -902,6 +1038,7 @@ public class EventService {
         // Types: MEETING(1), WORK(2), APPOINTMENT(3), REMINDER(4), TASK(5),
         // BIRTHDAY(6), HOLIDAY(7), ROUTE(8), OTHERS(9), STUDY(11)
         if (googleEvent.getColorId() != null) {
+            event.setColorHex(mapGoogleColorIdToHex(googleEvent.getColorId()));
             switch (googleEvent.getColorId()) {
                 case "1" -> event.setType(EventType.MEETING);
                 case "2" -> event.setType(EventType.WORK);
@@ -986,10 +1123,9 @@ public class EventService {
     }
 
     private void syncAttendeesFromGoogle(Event event, com.google.api.services.calendar.model.Event googleEvent) {
-        // Clear existing members if it's an update to avoid duplicates
-        // (Alternatively, perform a merge, but clearing is safer for simple sync)
-        if (event.getMembers() != null && !event.getMembers().isEmpty()) {
-            memberRepository.deleteAll(event.getMembers());
+        // Keep Hibernate-managed collection instance; orphanRemoval expects in-place
+        // mutation.
+        if (event.getMembers() != null) {
             event.getMembers().clear();
         }
 
@@ -1033,8 +1169,10 @@ public class EventService {
             }
         }
 
-        memberRepository.saveAll(members);
-        event.setMembers(members);
+        if (event.getMembers() == null) {
+            event.setMembers(new HashSet<>());
+        }
+        event.getMembers().addAll(members);
     }
 
     private LocalDateTime convertGoogleDateTimeToLocalDateTime(com.google.api.client.util.DateTime dateTime) {
@@ -1054,5 +1192,187 @@ public class EventService {
         // We use systemDefault() to be consistent with other parts of the app.
         return LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(dateTime.getValue()),
                 java.time.ZoneId.systemDefault());
+    }
+
+    private void normalizeAllDayEventTimes(Event event, EventRequest request) {
+        if (event == null || request == null || !request.allDay()) {
+            return;
+        }
+
+        LocalDateTime start = event.getStartTime();
+        if (start == null) {
+            if (request.date() == null) {
+                throw new EmptyFieldException("All-day events require either date or startTime");
+            }
+            start = request.date().atStartOfDay();
+            event.setStartTime(start);
+        }
+
+        if (event.getEndTime() == null || !event.getEndTime().isAfter(start)) {
+            event.setEndTime(start.plusDays(1));
+        }
+    }
+
+    private boolean shouldSyncToGoogle(Calendar calendar) {
+        if (googleCalendarApiService == null || calendar == null || calendar.getUserId() == null) {
+            return false;
+        }
+
+        if (googleAuthService != null && !googleAuthService.isGoogleConnected(calendar.getUserId())) {
+            return false;
+        }
+
+        try {
+            String primaryGoogleCalendarId = googleCalendarApiService.getPrimaryCalendarId(calendar.getUserId());
+            if (primaryGoogleCalendarId == null || primaryGoogleCalendarId.isBlank()) {
+                return false;
+            }
+
+            if (calendar.getGoogleCalendarId() != null && !calendar.getGoogleCalendarId().isBlank()) {
+                return primaryGoogleCalendarId.equalsIgnoreCase(calendar.getGoogleCalendarId());
+            }
+
+            // Resolve any existing designated Google sync calendar for this user.
+            java.util.List<Calendar> userCalendars = calendarRepository
+                    .findCalendarByUserIdAndIsDeletedFalse(calendar.getUserId());
+            Calendar designatedSyncCalendar = userCalendars.stream()
+                    .filter(c -> c.getGoogleCalendarId() != null
+                            && !c.getGoogleCalendarId().isBlank()
+                            && primaryGoogleCalendarId.equalsIgnoreCase(c.getGoogleCalendarId()))
+                    .findFirst()
+                    .orElseGet(() -> userCalendars.stream()
+                            .filter(c -> c.getTitle() != null && primaryGoogleCalendarId.equalsIgnoreCase(c.getTitle()))
+                            .findFirst()
+                            .orElseGet(() -> userCalendars.stream()
+                                    .filter(c -> c.getDescription() != null
+                                            && c.getDescription().startsWith("Google sync calendar for "))
+                                    .findFirst()
+                                    .orElse(null)));
+
+            if (designatedSyncCalendar != null) {
+                if (!designatedSyncCalendar.getId().equals(calendar.getId())) {
+                    return false;
+                }
+                designatedSyncCalendar.setGoogleCalendarId(primaryGoogleCalendarId);
+                calendarRepository.save(designatedSyncCalendar);
+                return true;
+            }
+
+            // No designated sync calendar found. Auto-bind current calendar to avoid silent
+            // local-only event creation.
+            calendar.setGoogleCalendarId(primaryGoogleCalendarId);
+            calendarRepository.save(calendar);
+            return true;
+
+        } catch (IOException e) {
+            if (GoogleAuthService.isInvalidGrant(e)) {
+                log.error("Google token revoked while resolving sync calendar for user {}.", calendar.getUserId());
+                if (googleAuthService != null) {
+                    googleAuthService.markUserAsDisconnected(calendar.getUserId());
+                }
+            } else {
+                log.warn("Skipping Google sync for calendar {}. Could not resolve Google sync calendar: {}",
+                        calendar.getId(), e.getMessage());
+            }
+            return false;
+        }
+    }
+
+    private boolean shouldSyncExistingGoogleEvent(Event event) {
+        if (googleCalendarApiService == null
+                || event == null
+                || event.getGoogleCalendarId() == null
+                || event.getGoogleCalendarId().isBlank()) {
+            return false;
+        }
+        return googleAuthService == null || googleAuthService.isGoogleConnected(event.getCalendar().getUserId());
+    }
+
+    public void pushUnsyncedLocalEventsToGoogle(Calendar calendar) {
+        if (googleCalendarApiService == null || calendar == null || calendar.getUserId() == null) {
+            return;
+        }
+
+        List<Event> unsyncedEvents = eventRepository.findByCalendarIdAndSyncStatusIn(
+                calendar.getId(),
+                List.of(SyncStatus.AUTH_ERROR, SyncStatus.PENDING));
+
+        if (unsyncedEvents.isEmpty()) {
+            return;
+        }
+
+        log.info("Found {} unsynced events (AUTH_ERROR / PENDING) for calendar {}. Attempting to push to Google.",
+                unsyncedEvents.size(), calendar.getId());
+
+        String userId = calendar.getUserId();
+
+        for (Event event : unsyncedEvents) {
+            try {
+                com.google.api.services.calendar.model.Event googleEvent;
+
+                if (event.isAllDay()) {
+                    // Create all-day event
+                    googleEvent = googleCalendarApiService.createAllDayEvent(
+                            userId,
+                            event.getTitle(),
+                            event.getDescription(),
+                            event.getLocation(),
+                            event.getStartTime());
+                } else {
+                    // Create simple event
+                    googleEvent = googleCalendarApiService.createEvent(
+                            userId,
+                            event.getTitle(),
+                            event.getDescription(),
+                            event.getLocation(),
+                            event.getStartTime(),
+                            event.getEndTime(),
+                            event.getType().toString());
+                }
+
+                // If event had a local zoom conference, append it to description in Google side
+                // Update event with Google Calendar ID
+                event.setGoogleCalendarId(googleEvent.getId());
+                event.setSyncStatus(SyncStatus.SYNCED);
+                eventRepository.save(event);
+
+                log.info("Successfully pushed previously unsynced event {} to Google Calendar. Google ID: {}",
+                        event.getId(), googleEvent.getId());
+
+            } catch (IOException e) {
+                if (GoogleAuthService.isInvalidGrant(e)) {
+                    log.error("Google token revoked while pushing unsynced event {} for user {}.",
+                            event.getId(), userId);
+                    if (googleAuthService != null) {
+                        googleAuthService.markUserAsDisconnected(userId);
+                    }
+                    event.setSyncStatus(SyncStatus.AUTH_ERROR);
+                    eventRepository.save(event);
+                    return; // Stop trying this user's events immediately to avoid spam
+                } else {
+                    log.error("Transient error pushing unsynced event {} to Google Calendar: {}. Keeping as PENDING.",
+                            event.getId(), e.getMessage());
+                    event.setSyncStatus(SyncStatus.PENDING);
+                    eventRepository.save(event);
+                }
+            }
+        }
+    }
+
+    private String mapGoogleColorIdToHex(String colorId) {
+        return switch (colorId) {
+            case "1" -> "#a4bdfc";
+            case "2" -> "#7ae7bf";
+            case "3" -> "#dbadff";
+            case "4" -> "#ff887c";
+            case "5" -> "#fbd75b";
+            case "6" -> "#ffb878";
+            case "7" -> "#46d6db";
+            case "8" -> "#e1e1e1";
+            case "9" -> "#5484ed";
+            case "10" -> "#51b749";
+            case "11" -> "#dc2127";
+            default -> "#3788d8";
+        };
     }
 }

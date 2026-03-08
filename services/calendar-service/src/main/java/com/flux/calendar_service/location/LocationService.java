@@ -57,24 +57,32 @@ public class LocationService {
         return newLocation.getId();
     }
 
-    private String formatLocation(Location location) {
-        if (location != null) {
-            StringBuilder sb = new StringBuilder();
-            sb.append(location.getPlaceName());
+    public Location create(String eventId, LocationRequest request) {
+        Event event = eventRepository.findById(eventId)
+                .orElseThrow(() -> new ResourceNotFoundException("Event not found!"));
 
-            if (location.getStreetAddress() != null && !location.getStreetAddress().isBlank()) {
-                sb.append(", ").append(location.getStreetAddress());
-            }
-            if (location.getCity() != null && !location.getCity().isBlank()) {
-                sb.append(", ").append(location.getCity());
-            }
-            if (location.getCountry() != null && !location.getCountry().isBlank()) {
-                sb.append(", ").append(location.getCountry());
-            }
+        Location location = Location.builder()
+                .placeName(request.placeName())
+                .streetAddress(request.streetAddress())
+                .city(request.city())
+                .country(request.country())
+                .buildingName(request.buildingName())
+                .floor(request.floor())
+                .room(request.room())
+                .latitude(request.latitude())
+                .longitude(request.longitude())
+                .placeId(request.placeId())
+                .build();
 
-            return sb.toString();
-        }
-        return null;
+        Location newLocation = locationRepository.save(location);
+
+        event.setLocation(newLocation);
+        eventRepository.save(event);
+
+        // Sync with Google Calendar if event is already synced and service is available
+        googleCalendarSync(newLocation, event);
+
+        return newLocation;
     }
 
     public OpenInMapResponse openInMaps(String id) {
@@ -124,12 +132,11 @@ public class LocationService {
         if (googleCalendarApiService != null && event.getGoogleCalendarId() != null) {
             try {
                 String userId = event.getCalendar().getUserId();
-                String locationString = formatLocation(newLocation);
 
                 googleCalendarApiService.updateEventLocation(
                         userId,
                         event.getGoogleCalendarId(),
-                        locationString);
+                        newLocation);
 
                 log.info("Event location updated and synced to Google Calendar. Event ID: {}, Google Calendar ID: {}",
                         event.getId(), event.getGoogleCalendarId());
