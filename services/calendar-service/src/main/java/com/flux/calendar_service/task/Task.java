@@ -1,7 +1,7 @@
 package com.flux.calendar_service.task;
 
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -71,7 +71,7 @@ public class Task {
     private LocalDate date;
 
     @Column(name = "deadline")
-    private LocalDateTime deadline;
+    private Instant deadline;
 
     @Builder.Default
     @OneToMany(mappedBy = "task", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
@@ -83,9 +83,9 @@ public class Task {
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 }

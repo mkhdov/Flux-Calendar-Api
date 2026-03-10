@@ -16,6 +16,7 @@ import org.springframework.core.convert.ConversionFailedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -249,6 +250,24 @@ public class GlobalExceptionHandler {
         } else {
             errors.put("error", "Invalid request parameter format");
         }
+        errors.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse(errors));
+    }
+
+    /**
+     * Handle malformed JSON / request-body deserialization errors (400)
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException ex, WebRequest request) {
+        log.error("Request body parsing failed: {}", ex.getMessage());
+
+        Map<String, String> errors = new HashMap<>();
+        errors.put("error",
+                "Invalid request body format. For date-time fields use ISO-8601, e.g. 2026-03-09T22:30:00Z or 2026-03-09T22:30:00 (treated as UTC).");
         errors.put("path", request.getDescription(false).replace("uri=", ""));
 
         return ResponseEntity

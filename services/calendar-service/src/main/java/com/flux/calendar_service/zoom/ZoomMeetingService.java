@@ -18,7 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -114,7 +114,7 @@ public class ZoomMeetingService {
                     .agenda(zoomResponse.getAgenda())
                     .platformName("Zoom")
                     .syncStatus(Conference.SyncStatus.SYNCED)
-                    .lastSynced(LocalDateTime.now())
+                    .lastSynced(Instant.now())
                     .build();
 
             // Store settings as JSON
@@ -170,7 +170,7 @@ public class ZoomMeetingService {
             conference.setDuration(meetingRequest.getDuration());
             conference.setAgenda(meetingRequest.getAgenda());
             conference.setTimezone(meetingRequest.getTimezone());
-            conference.setLastSynced(LocalDateTime.now());
+            conference.setLastSynced(Instant.now());
 
             // Store settings as JSON
             if (meetingRequest.getSettings() != null) {

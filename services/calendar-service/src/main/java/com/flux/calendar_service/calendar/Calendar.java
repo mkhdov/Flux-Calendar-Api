@@ -1,6 +1,6 @@
 package com.flux.calendar_service.calendar;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -65,14 +65,14 @@ public class Calendar {
 
     @Column(name = "created_at", updatable = false)
     @CreatedDate
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @Column(name = "updated_at")
     @LastModifiedDate
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 
     @Column(name = "last_google_sync")
-    private LocalDateTime lastGoogleSync;
+    private Instant lastGoogleSync;
 
     @Column(name = "google_sync_token")
     private String googleSyncToken;

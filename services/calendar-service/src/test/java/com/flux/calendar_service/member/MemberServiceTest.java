@@ -1,7 +1,7 @@
 package com.flux.calendar_service.member;
 
 import com.flux.calendar_service.event.Event;
-import com.flux.calendar_service.event.EventRepository;
+import com.flux.calendar_service.event.EventService;
 import com.flux.calendar_service.event.EventStatus;
 import com.flux.calendar_service.event.EventType;
 import com.flux.calendar_service.member.dto.MemberRequest;
@@ -13,7 +13,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -31,7 +31,7 @@ class MemberServiceTest {
     private MemberRepository memberRepository;
 
     @Mock
-    private EventRepository eventRepository;
+    private EventService eventService;
 
     @Mock
     private MemberMapper memberMapper;
@@ -53,8 +53,8 @@ class MemberServiceTest {
                 .colorHex("#FF0000")
                 .type(EventType.MEETING)
                 .status(EventStatus.NOTSTARTED)
-                .startTime(LocalDateTime.now().plusDays(1))
-                .endTime(LocalDateTime.now().plusDays(1).plusHours(1))
+                .startTime(Instant.now().plusSeconds(86400))
+                .endTime(Instant.now().plusSeconds(90000))
                 .allDay(false)
                 .members(new HashSet<>())
                 .build();
@@ -65,7 +65,7 @@ class MemberServiceTest {
                 .fullName("Test User")
                 .event(testEvent)
                 .isOwner(false)
-                .createdAt(LocalDateTime.now())
+                .createdAt(Instant.now())
                 .build();
 
         testMemberRequest = new MemberRequest("Test User");
@@ -75,13 +75,13 @@ class MemberServiceTest {
                 "test@example.com",
                 "Test User",
                 false,
-                LocalDateTime.now());
+                Instant.now());
     }
 
     @Test
     void addMember_ShouldAddMemberSuccessfully() {
         // Given
-        when(eventRepository.findById("event-123")).thenReturn(Optional.of(testEvent));
+        when(eventService.getEventByIdTypeEvent("event-123")).thenReturn(testEvent);
         when(memberRepository.save(any(Member.class))).thenReturn(testMember);
 
         // When
@@ -89,7 +89,7 @@ class MemberServiceTest {
 
         // Then
         assertThat(result).isEqualTo("member-123");
-        verify(eventRepository).findById("event-123");
+        verify(eventService).getEventByIdTypeEvent("event-123");
         verify(memberRepository).save(any(Member.class));
     }
 

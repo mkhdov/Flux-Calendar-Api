@@ -1,6 +1,6 @@
 package com.flux.calendar_service.conference;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 import com.flux.calendar_service.event.Event;
 
@@ -99,15 +99,15 @@ public class Conference {
     private SyncStatus syncStatus;
 
     @Column(name = "last_synced")
-    private LocalDateTime lastSynced;
+    private Instant lastSynced;
 
     @CreatedDate
     @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @LastModifiedDate
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 
     // Relationship with Event (One-to-One)
     @OneToOne(mappedBy = "conference")

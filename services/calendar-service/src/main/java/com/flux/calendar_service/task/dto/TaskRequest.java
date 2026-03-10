@@ -7,8 +7,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Builder;
 
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Schema(description = "Request body for creating a new task")
@@ -22,6 +22,7 @@ public record TaskRequest(
         @Schema(description = "Current status of the task") TaskStatus status,
         @Schema(description = "Priority level of the task") TaskPriority priority,
         @Schema(description = "Optional due date (date only)") LocalDate date,
-        @Schema(description = "Optional deadline (date and time)") LocalDateTime deadline,
+        @Schema(description = "Optional deadline (date and time)")
+        @com.fasterxml.jackson.databind.annotation.JsonDeserialize(using = com.flux.calendar_service.config.FlexibleInstantDeserializer.class) Instant deadline,
         @Schema(description = "Optional list of subtasks") List<SubtaskRequest> subtasks) {
 }

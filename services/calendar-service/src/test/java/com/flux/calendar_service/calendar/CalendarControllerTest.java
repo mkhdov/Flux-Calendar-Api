@@ -11,7 +11,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -51,7 +51,7 @@ class CalendarControllerTest {
     void getById_ShouldReturnCalendar() throws Exception {
         CalendarResponse response = new CalendarResponse(
                 "1", "user1", "My Cal", "Desc", "#000", "UTC", true, false,
-                LocalDateTime.now(), LocalDateTime.now());
+                Instant.now(), Instant.now());
 
         when(calendarService.getCalendarById("1")).thenReturn(response);
 
@@ -64,7 +64,7 @@ class CalendarControllerTest {
     void getByUserId_ShouldReturnList() throws Exception {
         CalendarResponse response = new CalendarResponse(
                 "1", "user1", "My Cal", "Desc", "#000", "UTC", true, false,
-                LocalDateTime.now(), LocalDateTime.now());
+                Instant.now(), Instant.now());
 
         when(calendarService.getCalendarsByUserId("user1")).thenReturn(List.of(response));
 

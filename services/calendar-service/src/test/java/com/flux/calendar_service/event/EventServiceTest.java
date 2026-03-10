@@ -19,7 +19,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -56,9 +56,10 @@ class EventServiceTest {
     @Test
     void createEvent_ShouldReturnId() {
         String calendarId = "cal1";
+        Instant now = Instant.now();
         EventRequest request = new EventRequest(
                 "New Event", "Description", "#000000", EventType.MEETING, null,
-                LocalDateTime.now(), LocalDateTime.now().plusHours(1), false, EventStatus.NOTSTARTED,
+                now, now.plusSeconds(3600), false, EventStatus.NOTSTARTED,
                 Collections.emptyList(), Collections.emptyList(), null);
         Calendar calendar = new Calendar();
         calendar.setId("cal1");
@@ -85,15 +86,16 @@ class EventServiceTest {
     @Test
     void getEventsByCalendarId_ShouldReturnList() {
         String calendarId = "cal1";
+        Instant now = Instant.now();
         Calendar calendar = new Calendar();
         Event event = new Event();
         EventResponse response = new EventResponse(
                 "1", null, "Event 1", "Desc", "#000", null, null,
-                EventType.MEETING, LocalDateTime.now(), LocalDateTime.now().plusHours(1),
+                EventType.MEETING, now, now.plusSeconds(3600),
                 false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                 Collections.emptyList(),
-                LocalDateTime.now(), LocalDateTime.now());
+                now, now);
 
         when(calendarRepository.findById(calendarId)).thenReturn(Optional.of(calendar));
         when(eventRepository.findByCalendarId(calendarId)).thenReturn(List.of(event));
@@ -108,14 +110,15 @@ class EventServiceTest {
     @Test
     void getEventById_ShouldReturnEvent() {
         String id = "1";
+        Instant now = Instant.now();
         Event event = new Event();
         EventResponse response = new EventResponse(
                 "1", null, "Event 1", "Desc", "#000", null, null,
-                EventType.MEETING, LocalDateTime.now(), LocalDateTime.now().plusHours(1),
+                EventType.MEETING, now, now.plusSeconds(3600),
                 false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                 Collections.emptyList(),
-                LocalDateTime.now(), LocalDateTime.now());
+                now, now);
 
         when(eventRepository.findById(id)).thenReturn(Optional.of(event));
         when(eventMapper.toEventResponse(event)).thenReturn(response);

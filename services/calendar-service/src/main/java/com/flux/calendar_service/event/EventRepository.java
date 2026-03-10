@@ -1,6 +1,6 @@
 package com.flux.calendar_service.event;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,8 +23,8 @@ public interface EventRepository extends JpaRepository<Event, String> {
             """)
     List<Event> findEventsWithRelations(
             @Param("calendarId") String calendarId,
-            @Param("start") LocalDateTime start,
-            @Param("end") LocalDateTime end);
+            @Param("start") Instant start,
+            @Param("end") Instant end);
 
     List<Event> findByCalendarId(String calendarId);
 
@@ -34,9 +34,9 @@ public interface EventRepository extends JpaRepository<Event, String> {
 
     Optional<Event> findEventByLocationId(String locationId);
 
-    List<Event> findByStartTimeBetween(LocalDateTime start, LocalDateTime end);
+    List<Event> findByStartTimeBetween(Instant start, Instant end);
 
-    List<Event> findByCalendarIdAndStartTimeBetween(String calendarId, LocalDateTime start, LocalDateTime end);
+    List<Event> findByCalendarIdAndStartTimeBetween(String calendarId, Instant start, Instant end);
 
     List<Event> findByCalendarIdAndSyncStatusIn(String calendarId, List<SyncStatus> syncStatuses);
 

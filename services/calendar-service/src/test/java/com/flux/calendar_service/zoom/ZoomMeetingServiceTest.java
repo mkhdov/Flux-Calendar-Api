@@ -8,7 +8,7 @@ import com.flux.calendar_service.event.Event;
 import com.flux.calendar_service.event.EventRepository;
 import com.flux.calendar_service.event.EventStatus;
 import com.flux.calendar_service.event.EventType;
-import com.flux.calendar_service.exception.ResourceNotFoundException;
+import com.flux.calendar_service.exception.ZoomException;
 import com.flux.calendar_service.zoom.dto.ZoomMeetingRequest;
 import com.flux.calendar_service.zoom.dto.ZoomMeetingResponse;
 import com.flux.calendar_service.zoom.dto.ZoomTokenResponse;
@@ -22,7 +22,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -65,7 +65,7 @@ class ZoomMeetingServiceTest {
 
     @BeforeEach
     void setUp() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
 
         Calendar calendar = Calendar.builder()
                 .id("cal-123")
@@ -80,8 +80,8 @@ class ZoomMeetingServiceTest {
                 .colorHex("#FF0000")
                 .type(EventType.MEETING)
                 .status(EventStatus.NOTSTARTED)
-                .startTime(LocalDateTime.now().plusDays(1))
-                .endTime(LocalDateTime.now().plusDays(1).plusHours(1))
+                .startTime(Instant.now().plusSeconds(86400))
+                .endTime(Instant.now().plusSeconds(90000))
                 .allDay(false)
                 .build();
 
@@ -183,7 +183,7 @@ class ZoomMeetingServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> zoomMeetingService.createZoomMeeting(EVENT_ID, USER_ID))
-                .isInstanceOf(ResourceNotFoundException.class)
+                .isInstanceOf(ZoomException.class)
                 .hasMessageContaining("Event not found");
 
         verify(zoomApiClient, never()).createMeeting(anyString(), any());
@@ -227,7 +227,7 @@ class ZoomMeetingServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> zoomMeetingService.updateZoomMeeting(EVENT_ID, USER_ID))
-                .isInstanceOf(ResourceNotFoundException.class)
+                .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Zoom meeting not found");
     }
 

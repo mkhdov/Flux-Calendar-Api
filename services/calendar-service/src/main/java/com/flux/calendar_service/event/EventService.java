@@ -1,7 +1,7 @@
 package com.flux.calendar_service.event;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -284,7 +284,7 @@ public class EventService {
                             .pin(pin)
                             .conferenceLink(meetLink)
                             .syncStatus(Conference.SyncStatus.SYNCED)
-                            .lastSynced(LocalDateTime.now())
+                            .lastSynced(Instant.now())
                             .event(savedEvent)
                             .build();
                     savedEvent.setConference(conference);
@@ -384,7 +384,7 @@ public class EventService {
                     .pin(pin)
                     .conferenceLink(meetLink)
                     .syncStatus(Conference.SyncStatus.SYNCED)
-                    .lastSynced(LocalDateTime.now())
+                    .lastSynced(Instant.now())
                     .event(event)
                     .build();
 
@@ -612,7 +612,8 @@ public class EventService {
             // Sync with Google Calendar if enabled
             if (shouldSyncExistingGoogleEvent(event)) {
                 StringBuilder description = new StringBuilder();
-                description.append(event.getDescription()).append("\n\nZoom Meeting: ").append(conference.getConferenceLink());
+                description.append(event.getDescription()).append("\n\nZoom Meeting: ")
+                        .append(conference.getConferenceLink());
                 googleCalendarApiService.updateEvent(
                         event.getCalendar().getUserId(),
                         event.getGoogleCalendarId(),
@@ -627,6 +628,7 @@ public class EventService {
             throw new ServiceUnavailableException("Failed to add Zoom meeting", e);
         }
     }
+
     /**
      * Removes only the Zoom meeting link portion appended during creation.
      * Leaves the rest of the user's original description intact.
@@ -684,12 +686,13 @@ public class EventService {
                         event.getCalendar().getUserId(),
                         event.getGoogleCalendarId(),
                         event.getTitle(),
-                        cleanedDescription);  // ✅ cleaned, not raw event.getDescription()
+                        cleanedDescription); // ✅ cleaned, not raw event.getDescription()
                 log.info("Google Calendar updated after Zoom removal. Event ID: {}", id);
             } catch (IOException e) {
                 if (GoogleAuthService.isInvalidGrant(e)) {
                     log.error("Google token revoked while removing Zoom link for user {}", userId);
-                    if (googleAuthService != null) googleAuthService.markUserAsDisconnected(userId);
+                    if (googleAuthService != null)
+                        googleAuthService.markUserAsDisconnected(userId);
                     event.setSyncStatus(SyncStatus.AUTH_ERROR);
                 } else {
                     log.error("Failed to update Google Calendar after removing Zoom. Event ID: {}", event.getId(), e);
@@ -753,7 +756,7 @@ public class EventService {
         return userEvents;
     }
 
-    public List<EventResponse> getEventsByDateRange(String calendarId, LocalDateTime start, LocalDateTime end) {
+    public List<EventResponse> getEventsByDateRange(String calendarId, Instant start, Instant end) {
         if (start == null || end == null) {
             throw new EmptyFieldException("Start and end dates cannot be null");
         }
@@ -776,8 +779,8 @@ public class EventService {
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
 
         // Validate time if being updated
-        LocalDateTime newStartTime = request.startTime() != null ? request.startTime() : event.getStartTime();
-        LocalDateTime newEndTime = request.endTime() != null ? request.endTime() : event.getEndTime();
+        Instant newStartTime = request.startTime() != null ? request.startTime() : event.getStartTime();
+        Instant newEndTime = request.endTime() != null ? request.endTime() : event.getEndTime();
         boolean isAllDay = request.allDay() != null ? request.allDay() : event.isAllDay();
 
         if (!isAllDay && newStartTime != null && newEndTime != null) {
@@ -967,7 +970,7 @@ public class EventService {
 
             // Update sync metadata
             calendar.setGoogleSyncToken(syncResult.getNextSyncToken());
-            calendar.setLastGoogleSync(LocalDateTime.now());
+            calendar.setLastGoogleSync(Instant.now());
             calendarRepository.save(calendar);
 
         } catch (IOException e) {
@@ -996,10 +999,10 @@ public class EventService {
         event.setCalendar(calendar);
         event.setGoogleCalendarId(googleEvent.getId());
         if (googleEvent.getUpdated() != null) {
-            event.setGoogleUpdatedAt(convertGoogleDateTimeToLocalDateTime(googleEvent.getUpdated()));
+            event.setGoogleUpdatedAt(convertToInstant(googleEvent.getUpdated()));
         }
         updateEventFieldsFromGoogle(event, googleEvent);
-        event.setCreatedAt(LocalDateTime.now());
+        event.setCreatedAt(Instant.now());
         event.setStatus(EventStatus.NOTSTARTED);
 
         eventRepository.save(event);
@@ -1010,7 +1013,7 @@ public class EventService {
 
     private void updateLocalEventFromGoogle(Event event, com.google.api.services.calendar.model.Event googleEvent) {
         if (googleEvent.getUpdated() != null) {
-            LocalDateTime googleUpdated = convertGoogleDateTimeToLocalDateTime(googleEvent.getUpdated());
+            Instant googleUpdated = convertToInstant(googleEvent.getUpdated());
             if (event.getGoogleUpdatedAt() != null && !googleUpdated.isAfter(event.getGoogleUpdatedAt())) {
                 log.debug("Skipping update for event {} - no changes on Google side", event.getId());
                 return;
@@ -1074,7 +1077,7 @@ public class EventService {
             if (conference == null) {
                 conference = new Conference();
                 conference.setSyncStatus(Conference.SyncStatus.SYNCED);
-                conference.setLastSynced(LocalDateTime.now());
+                conference.setLastSynced(Instant.now());
             }
 
             if (googleEvent.getConferenceData() != null) {
@@ -1110,13 +1113,14 @@ public class EventService {
         if (googleEvent.getStart().getDate() != null) {
             // All day
             event.setAllDay(true);
-            event.setStartTime(convertGoogleDateToLocalDateTime(googleEvent.getStart().getDate()));
-            event.setEndTime(convertGoogleDateToLocalDateTime(googleEvent.getEnd().getDate()).minusDays(1));
+            event.setStartTime(convertToInstant(googleEvent.getStart().getDate()));
+            event.setEndTime(
+                    convertToInstant(googleEvent.getEnd().getDate()).minus(1, java.time.temporal.ChronoUnit.DAYS));
         } else {
             // Timed
             event.setAllDay(false);
-            event.setStartTime(convertGoogleDateTimeToLocalDateTime(googleEvent.getStart().getDateTime()));
-            event.setEndTime(convertGoogleDateTimeToLocalDateTime(googleEvent.getEnd().getDateTime()));
+            event.setStartTime(convertToInstant(googleEvent.getStart().getDateTime()));
+            event.setEndTime(convertToInstant(googleEvent.getEnd().getDateTime()));
         }
 
         event.setSyncStatus(SyncStatus.SYNCED);
@@ -1175,23 +1179,8 @@ public class EventService {
         event.getMembers().addAll(members);
     }
 
-    private LocalDateTime convertGoogleDateTimeToLocalDateTime(com.google.api.client.util.DateTime dateTime) {
-        return LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(dateTime.getValue()),
-                java.time.ZoneId.systemDefault());
-    }
-
-    private LocalDateTime convertGoogleDateToLocalDateTime(com.google.api.client.util.DateTime dateTime) {
-        // Date only, treat as start of day system default
-        // dateTime.getValue() returns millis.
-        // Google client DateTime(true, value, tz) for date-only sometimes has specific
-        // parsing.
-        // Safest is to use value.
-        // Notes: Google Calendar API 'date' field is yyyy-mm-dd. DateTime parses it to
-        // midnight UTC or similar.
-        // But getValue() gives millis.
-        // We use systemDefault() to be consistent with other parts of the app.
-        return LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(dateTime.getValue()),
-                java.time.ZoneId.systemDefault());
+    private Instant convertToInstant(com.google.api.client.util.DateTime dateTime) {
+        return Instant.ofEpochMilli(dateTime.getValue());
     }
 
     private void normalizeAllDayEventTimes(Event event, EventRequest request) {
@@ -1199,17 +1188,17 @@ public class EventService {
             return;
         }
 
-        LocalDateTime start = event.getStartTime();
+        Instant start = event.getStartTime();
         if (start == null) {
             if (request.date() == null) {
                 throw new EmptyFieldException("All-day events require either date or startTime");
             }
-            start = request.date().atStartOfDay();
+            start = request.date().atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
             event.setStartTime(start);
         }
 
         if (event.getEndTime() == null || !event.getEndTime().isAfter(start)) {
-            event.setEndTime(start.plusDays(1));
+            event.setEndTime(start.plus(1, java.time.temporal.ChronoUnit.DAYS));
         }
     }
 

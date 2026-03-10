@@ -1,7 +1,5 @@
 package com.flux.calendar_service.note;
-
-import java.time.LocalDateTime;
-
+import java.time.Instant;
 import com.flux.calendar_service.event.Event;
 import com.flux.calendar_service.task.Task;
 
@@ -58,9 +56,9 @@ public class Note {
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 }

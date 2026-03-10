@@ -9,7 +9,7 @@ import com.flux.calendar_service.location.dto.LocationResponse;
 import com.flux.calendar_service.member.dto.MemberResponseDTO;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @Schema(description = "Event response with full details including calendar, location, conference, subtasks, attachments, members and notes")
@@ -22,8 +22,8 @@ public record EventResponse(
         @Schema(description = "Event location") LocationResponse location,
         @Schema(description = "Conference/meeting link") ConferenceResponse conference,
         @Schema(description = "Event type") EventType type,
-        @Schema(description = "Start time") LocalDateTime startTime,
-        @Schema(description = "End time") LocalDateTime endTime,
+        @Schema(description = "Start time") Instant startTime,
+        @Schema(description = "End time") Instant endTime,
         @Schema(description = "All-day event flag") boolean allDay,
         @Schema(description = "Sync status with Google") SyncStatus syncStatus,
         @Schema(description = "Event status") EventStatus status,
@@ -31,6 +31,6 @@ public record EventResponse(
         @Schema(description = "List of attachments") List<com.flux.calendar_service.attachment.dto.AttachmentResponse> attachments,
         @Schema(description = "List of members") List<MemberResponseDTO> members,
         @Schema(description = "List of notes") List<com.flux.calendar_service.note.dto.NoteResponse> notes,
-        @Schema(description = "Creation timestamp") LocalDateTime createdAt,
-        @Schema(description = "Last update timestamp") LocalDateTime updatedAt) {
+        @Schema(description = "Creation timestamp") Instant createdAt,
+        @Schema(description = "Last update timestamp") Instant updatedAt) {
 }

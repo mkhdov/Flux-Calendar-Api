@@ -16,7 +16,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -87,7 +87,7 @@ public class GoogleCalendarApiService {
          * Create a simple event in Google Calendar
          */
         public Event createEvent(String userId, String title, String description, Location location,
-                        LocalDateTime startTime, LocalDateTime endTime, String type) throws IOException {
+                        Instant startTime, Instant endTime, String type) throws IOException {
 
                 Event event = new Event()
                                 .setSummary(title)
@@ -149,8 +149,7 @@ public class GoogleCalendarApiService {
                         String title,
                         String description,
                         Location location,
-                        LocalDateTime startTime,
-                        LocalDateTime endTime,
+                        Instant startTime, Instant endTime,
                         String type) throws IOException {
 
                 Event event = new Event()
@@ -288,7 +287,7 @@ public class GoogleCalendarApiService {
          * Create a detailed event with location, attendees, and reminders
          */
         public Event createDetailedEvent(String userId, String title, String description,
-                        LocalDateTime startTime, LocalDateTime endTime,
+                        Instant startTime, Instant endTime,
                         String location, List<String> attendeeEmails, String type) throws IOException {
 
                 Event event = new Event()
@@ -339,13 +338,13 @@ public class GoogleCalendarApiService {
          * Create an all-day event
          */
         public Event createAllDayEvent(String userId, String title, String description, Location location,
-                        LocalDateTime date) throws IOException {
+                        Instant date) throws IOException {
 
                 Event event = new Event()
                                 .setSummary(title)
                                 .setDescription(description);
 
-                java.time.LocalDate startDate = date.toLocalDate();
+                java.time.LocalDate startDate = date.atZone(ZoneId.of("UTC")).toLocalDate();
                 java.time.LocalDate endDate = startDate.plusDays(1);
 
                 // For all-day events, use date instead of dateTime
@@ -376,13 +375,13 @@ public class GoogleCalendarApiService {
         }
 
         public Event createAllDayEventWithGoogleMeet(String userId, String title, String description,
-                        LocalDateTime date) throws IOException {
+                        Instant date) throws IOException {
 
                 Event event = new Event()
                                 .setSummary(title)
                                 .setDescription(description);
 
-                java.time.LocalDate startDate = date.toLocalDate();
+                java.time.LocalDate startDate = date.atZone(ZoneId.systemDefault()).toLocalDate();
                 java.time.LocalDate endDate = startDate.plusDays(1);
 
                 EventDateTime start = new EventDateTime()
@@ -419,7 +418,7 @@ public class GoogleCalendarApiService {
          * Create a recurring event
          */
         public Event createRecurringEvent(String userId, String title, String description,
-                        LocalDateTime startTime, LocalDateTime endTime,
+                        Instant startTime, Instant endTime,
                         String recurrenceRule) throws IOException {
 
                 Event event = new Event()
@@ -497,8 +496,8 @@ public class GoogleCalendarApiService {
         /**
          * Get events within a date range
          */
-        public List<Event> getEventsByDateRange(String userId, LocalDateTime startDate,
-                        LocalDateTime endDate) throws IOException {
+        public List<Event> getEventsByDateRange(String userId, Instant startDate,
+                        Instant endDate) throws IOException {
 
                 DateTime timeMin = convertToDateTime(startDate);
                 DateTime timeMax = convertToDateTime(endDate);
@@ -553,7 +552,7 @@ public class GoogleCalendarApiService {
         /**
          * Get events updated/modified after a specific time
          */
-        public List<Event> getUpdatedEvents(String userId, LocalDateTime updatedMin) throws IOException {
+        public List<Event> getUpdatedEvents(String userId, Instant updatedMin) throws IOException {
                 DateTime updateTime = convertToDateTime(updatedMin);
 
                 Events events = getCalendarClient(userId).events()
@@ -630,8 +629,8 @@ public class GoogleCalendarApiService {
          * Update event date and time
          */
         public Event updateEventDateTime(String userId, String eventId,
-                        LocalDateTime newStartTime,
-                        LocalDateTime newEndTime) throws IOException {
+                        Instant newStartTime,
+                        Instant newEndTime) throws IOException {
 
                 Event event = getCalendarClient(userId).events()
                                 .get(calendarId, eventId)
@@ -690,7 +689,7 @@ public class GoogleCalendarApiService {
          * Update complete event with all details
          */
         public Event updateCompleteEvent(String userId, String eventId, String title, String description,
-                        LocalDateTime startTime, LocalDateTime endTime,
+                        Instant startTime, Instant endTime,
                         String location, List<String> attendeeEmails) throws IOException {
 
                 Event event = getCalendarClient(userId).events()
@@ -829,8 +828,8 @@ public class GoogleCalendarApiService {
         /**
          * Delete all events in a date range
          */
-        public int deleteEventsByDateRange(String userId, LocalDateTime startDate,
-                        LocalDateTime endDate) throws IOException {
+        public int deleteEventsByDateRange(String userId, Instant startDate,
+                        Instant endDate) throws IOException {
 
                 List<Event> events = getEventsByDateRange(userId, startDate, endDate);
                 int deletedCount = 0;
@@ -934,8 +933,14 @@ public class GoogleCalendarApiService {
 
                 for (EventData data : eventDataList) {
                         try {
-                                Event event = createEvent(userId, data.title, data.description, null,
-                                                data.startTime, data.endTime, data.type);
+                                Event event = createEvent(
+                                                userId,
+                                                data.title,
+                                                data.description,
+                                                null,
+                                                data.startTime,
+                                                data.endTime,
+                                                data.type);
                                 createdEvents.add(event);
                         } catch (IOException e) {
                                 System.err.println("Failed to create event: " + data.title + " for user " + userId);
@@ -1007,12 +1012,12 @@ public class GoogleCalendarApiService {
         public static class EventData {
                 public String title;
                 public String description;
-                public LocalDateTime startTime;
-                public LocalDateTime endTime;
+                public Instant startTime;
+                public Instant endTime;
                 public String type;
 
                 public EventData(String title, String description,
-                                LocalDateTime startTime, LocalDateTime endTime) {
+                                Instant startTime, Instant endTime) {
                         this.title = title;
                         this.description = description;
                         this.startTime = startTime;
@@ -1042,20 +1047,17 @@ public class GoogleCalendarApiService {
         }
 
         /**
-         * Convert LocalDateTime to Google DateTime
+         * Convert Instant to Google DateTime
          */
-        private DateTime convertToDateTime(LocalDateTime localDateTime) {
-                return new DateTime(
-                                Date.from(localDateTime.atZone(ZoneId.systemDefault()).toInstant()));
+        private DateTime convertToDateTime(Instant instant) {
+                return new DateTime(Date.from(instant));
         }
 
         /**
-         * Convert Google DateTime to LocalDateTime
+         * Convert Google DateTime to Instant
          */
-        private LocalDateTime convertToLocalDateTime(DateTime dateTime) {
-                return LocalDateTime.ofInstant(
-                                new Date(dateTime.getValue()).toInstant(),
-                                ZoneId.systemDefault());
+        private Instant convertToInstant(DateTime dateTime) {
+                return Instant.ofEpochMilli(dateTime.getValue());
         }
 
         /**

@@ -57,6 +57,8 @@ eureka:
     lease-expiration-duration-in-seconds: 90
 
 app:
+  frontend:
+    url: ${FRONTEND_URL}
   jwt:
     secret: ${JWT_SECRET}
 

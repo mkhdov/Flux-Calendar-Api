@@ -1,6 +1,6 @@
 package com.flux.calendar_service.event;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -57,7 +57,7 @@ public class Event {
     private String googleCalendarId;
 
     @Column(name = "google_updated_at")
-    private LocalDateTime googleUpdatedAt;
+    private Instant googleUpdatedAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "calendar_id", nullable = false)
@@ -101,10 +101,10 @@ public class Event {
     private EventType type;
 
     @Column(name = "start_time")
-    private LocalDateTime startTime;
+    private Instant startTime;
 
     @Column(name = "end_time")
-    private LocalDateTime endTime;
+    private Instant endTime;
 
     @Column(name = "all_day")
     private boolean allDay;
@@ -122,9 +122,9 @@ public class Event {
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 }

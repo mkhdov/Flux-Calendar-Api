@@ -11,7 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -27,9 +29,9 @@ public class EventReminderScheduler {
     @Scheduled(cron = "0 * * * * *") // Every minute
     @org.springframework.transaction.annotation.Transactional
     public void checkUpcomingEvents() {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDateTime start = now.plusMinutes(30).withSecond(0).withNano(0);
-        LocalDateTime end = start.plusMinutes(1);
+        Instant now = Instant.now();
+        Instant start = now.plus(30, java.time.temporal.ChronoUnit.MINUTES).truncatedTo(java.time.temporal.ChronoUnit.MINUTES);
+        Instant end = start.plus(1, java.time.temporal.ChronoUnit.MINUTES);
 
         List<Event> events = eventRepository.findByStartTimeBetween(start, end);
 
@@ -54,47 +56,94 @@ public class EventReminderScheduler {
     }
 
     private String buildEmailBody(Event event) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("<h1>Event Reminder</h1>");
-        sb.append("<p>Hi,</p>");
-        sb.append("<p>This is a reminder that your event <b>").append(event.getTitle())
-                .append("</b> is starting in 30 minutes.</p>");
 
-        sb.append("<h3>Details:</h3>");
-        sb.append("<ul>");
-        sb.append("<li><b>Time:</b> ")
-                .append(event.getStartTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))).append("</li>");
+        String formattedTime = ZonedDateTime.ofInstant(event.getStartTime(), ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern("EEEE, MMM dd • HH:mm"));
+
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("""
+        <html>
+        <body style="font-family:Arial, sans-serif;background:#f4f6f9;padding:40px;">
+        <div style="max-width:600px;margin:auto;background:white;padding:30px;
+                    border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+        """);
+
+        sb.append("<h2 style='color:#2c3e50;'>⏰ Event Reminder</h2>");
+        sb.append("<p>Hi,</p>");
+        sb.append("<p>Your event <b>").append(event.getTitle())
+                .append("</b> will start in <b>30 minutes</b>.</p>");
+
+        sb.append("<div style='background:#f8f9fa;padding:15px;border-radius:8px;margin-top:20px;'>");
+        sb.append("<h3 style='margin-top:0;color:#34495e;'>Event Details</h3>");
+
+        sb.append("<p><b>📅 Time:</b> ").append(formattedTime).append("</p>");
 
         Location location = event.getLocation();
         if (location != null) {
-            sb.append("<li><b>Location:</b> ").append(location.getPlaceName());
+            sb.append("<p><b>📍 Location:</b> ").append(location.getPlaceName());
             if (location.getStreetAddress() != null) {
                 sb.append(", ").append(location.getStreetAddress());
             }
-            sb.append("</li>");
+            sb.append("</p>");
         }
 
         if (event.getDescription() != null && !event.getDescription().isEmpty()) {
-            sb.append("<li><b>Description:</b> ").append(event.getDescription()).append("</li>");
+            sb.append("<p><b>📝 Description:</b> ").append(event.getDescription()).append("</p>");
         }
+
+        sb.append("</div>");
 
         Conference conference = event.getConference();
         if (conference != null) {
-            String link = conference.getMeetLink() != null ? conference.getMeetLink() : conference.getConferenceLink();
+
+            String link = conference.getMeetLink() != null ?
+                    conference.getMeetLink() : conference.getConferenceLink();
+
             if (link != null) {
-                sb.append("<li><b>Meeting Link:</b> <a href=\"").append(link).append("\">Join Meeting</a></li>");
+
+                sb.append("""
+                <div style="text-align:center;margin:30px 0;">
+                <a href=\"""").append(link).append("""
+                \" style="
+                background:#3498db;
+                color:white;
+                padding:14px 28px;
+                text-decoration:none;
+                border-radius:8px;
+                font-weight:bold;
+                display:inline-block;">
+                Join Meeting
+                </a>
+                </div>
+                """);
             }
         }
 
-        sb.append("</ul>");
-
         if (!event.getSubtasks().isEmpty()) {
-            sb.append("<h3>Subtasks:</h3><ul>");
-            event.getSubtasks().forEach(subtask -> sb.append("<li>").append(subtask.getSubtask()).append("</li>"));
+
+            sb.append("<h3 style='color:#34495e;'>📋 Subtasks</h3>");
+            sb.append("<ul style='padding-left:20px;'>");
+
+            event.getSubtasks().forEach(subtask ->
+                    sb.append("<li style='margin-bottom:6px;'>")
+                            .append(subtask.getSubtask())
+                            .append("</li>")
+            );
+
             sb.append("</ul>");
         }
 
-        sb.append("<p>Best regards,<br>Flux</p>");
+        sb.append("""
+        <hr style="margin:30px 0">
+        <p style="font-size:12px;color:#888;">
+        This reminder was sent by <b>Flux Calendar</b>.
+        </p>
+        </div>
+        </body>
+        </html>
+        """);
+
         return sb.toString();
     }
 }

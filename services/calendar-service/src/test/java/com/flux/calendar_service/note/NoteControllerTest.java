@@ -11,7 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -34,7 +34,7 @@ class NoteControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    private static final LocalDateTime NOW = LocalDateTime.now();
+    private static final Instant NOW = Instant.now();
 
     @Test
     void createNoteForEvent_ShouldReturnNoteResponse() throws Exception {

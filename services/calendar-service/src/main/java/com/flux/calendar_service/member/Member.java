@@ -1,6 +1,6 @@
 package com.flux.calendar_service.member;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 import com.flux.calendar_service.event.Event;
 
@@ -54,9 +54,9 @@ public class Member {
 
     @CreatedDate
     @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @LastModifiedDate
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 }

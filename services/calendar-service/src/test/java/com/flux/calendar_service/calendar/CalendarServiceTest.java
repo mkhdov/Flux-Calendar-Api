@@ -10,7 +10,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -52,7 +52,7 @@ class CalendarServiceTest {
         Calendar calendar = new Calendar();
         CalendarResponse response = new CalendarResponse(
                 "1", "user1", "My Cal", "Desc", "#000", "UTC", true, false,
-                LocalDateTime.now(), LocalDateTime.now());
+                Instant.now(), Instant.now());
 
         when(calendarRepository.findCalendarByIdAndIsDeletedFalse(id)).thenReturn(Optional.of(calendar));
         when(calendarMapper.toCalendarResponse(calendar)).thenReturn(response);
@@ -69,7 +69,7 @@ class CalendarServiceTest {
         Calendar calendar = new Calendar();
         CalendarResponse response = new CalendarResponse(
                 "1", "user1", "My Cal", "Desc", "#000", "UTC", true, false,
-                LocalDateTime.now(), LocalDateTime.now());
+                Instant.now(), Instant.now());
 
         when(calendarRepository.findCalendarByUserIdAndIsDeletedFalse(userId)).thenReturn(List.of(calendar));
         when(calendarMapper.toCalendarResponse(calendar)).thenReturn(response);

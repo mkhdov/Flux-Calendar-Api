@@ -1,7 +1,5 @@
 package com.flux.calendar_service.attachment;
-
-import java.time.LocalDateTime;
-
+import java.time.Instant;
 import com.flux.calendar_service.event.Event;
 
 import org.springframework.data.annotation.CreatedDate;
@@ -61,9 +59,9 @@ public class Attachment {
 
     @CreatedDate
     @Column(name = "created_at", updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @LastModifiedDate
     @Column(name = "updated_at")
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 }

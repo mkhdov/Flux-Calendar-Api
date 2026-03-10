@@ -1,9 +1,6 @@
 package com.flux.calendar_service.attachment.dto;
 
-import io.swagger.v3.oas.annotations.media.Schema;
-
-import java.time.LocalDateTime;
-
+import io.swagger.v3.oas.annotations.media.Schema;import java.time.Instant;
 @Schema(description = "Attachment response with file metadata and timestamps")
 public record AttachmentResponse(
         @Schema(description = "Unique attachment ID") String id,
@@ -11,6 +8,6 @@ public record AttachmentResponse(
         @Schema(description = "Display title") String title,
         @Schema(description = "MIME type") String mimeType,
         @Schema(description = "File size in bytes") Long fileSize,
-        @Schema(description = "Creation timestamp") LocalDateTime createdAt,
-        @Schema(description = "Last update timestamp") LocalDateTime updatedAt) {
+        @Schema(description = "Creation timestamp") Instant createdAt,
+        @Schema(description = "Last update timestamp") Instant updatedAt) {
 }

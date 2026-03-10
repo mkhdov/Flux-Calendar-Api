@@ -11,7 +11,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
 
@@ -37,9 +37,10 @@ class EventControllerTest {
         @Test
         void createEvent_ShouldReturnId() throws Exception {
                 String calendarId = "cal1";
+                Instant now = Instant.now();
                 EventRequest request = new EventRequest(
                                 "New Event", "Description", "#000000", EventType.MEETING, null,
-                                LocalDateTime.now(), LocalDateTime.now().plusHours(1), false, EventStatus.NOTSTARTED,
+                                now, now.plusSeconds(3600), false, EventStatus.NOTSTARTED,
                                 Collections.emptyList(), Collections.emptyList(), null);
 
                 when(eventService.createEvent(eq(calendarId), any(EventRequest.class))).thenReturn("event1");
@@ -53,43 +54,46 @@ class EventControllerTest {
 
         @Test
         void getEventsByDateRange_ShouldReturnList() throws Exception {
+                Instant now = Instant.now();
                 EventResponse response = new EventResponse(
-                        "1", null, "Event 1", "Desc", "#000", null, null,
-                        EventType.MEETING, LocalDateTime.now(), LocalDateTime.now().plusHours(1),
-                        false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
-                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
-                        Collections.emptyList(),
-                        LocalDateTime.now(), LocalDateTime.now());
+                                "1", null, "Event 1", "Desc", "#000", null, null,
+                                EventType.MEETING, now, now.plusSeconds(3600),
+                                false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
+                                Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
+                                Collections.emptyList(),
+                                now, now);
 
                 when(eventService.getEventsByDateRange(any(), any(), any())).thenReturn(List.of(response));
 
                 mockMvc.perform(get("/events/range")
                                 .param("calendarId", "1")
-                                .param("start", LocalDateTime.now().toString())
-                                .param("end", LocalDateTime.now().plusDays(1).toString()))
-                        .andExpect(status().isOk())
-                        .andExpect(jsonPath("$[0].id").value("1"));
+                                .param("start", now.toString())
+                                .param("end", now.plusSeconds(86400).toString()))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$[0].id").value("1"));
         }
 
         @Test
         void getEventsByDateRange_WithInvalidStart_ShouldReturnBadRequest() throws Exception {
+                Instant now = Instant.now();
                 mockMvc.perform(get("/events/range")
                                 .param("calendarId", "1")
                                 .param("start", "NaN-NaN-NaNTNaN:NaN:NaN")
-                                .param("end", LocalDateTime.now().plusDays(1).toString()))
-                        .andExpect(status().isBadRequest())
-                        .andExpect(jsonPath("$.errors.start").exists());
+                                .param("end", now.plusSeconds(86400).toString()))
+                                .andExpect(status().isBadRequest())
+                                .andExpect(jsonPath("$.errors.start").exists());
         }
 
         @Test
         void getEventById_ShouldReturnEvent() throws Exception {
+                Instant now = Instant.now();
                 EventResponse response = new EventResponse(
                                 "1", null, "Event 1", "Desc", "#000", null, null,
-                                EventType.MEETING, LocalDateTime.now(), LocalDateTime.now().plusHours(1),
+                                EventType.MEETING, now, now.plusSeconds(3600),
                                 false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
                                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                                 Collections.emptyList(),
-                                LocalDateTime.now(), LocalDateTime.now());
+                                now, now);
                 when(eventService.getEventById("1")).thenReturn(response);
 
                 mockMvc.perform(get("/events/1"))

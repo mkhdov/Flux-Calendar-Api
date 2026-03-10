@@ -14,7 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 @RestController
@@ -84,8 +84,8 @@ public class EventController {
     @GetMapping("/range")
     public ResponseEntity<List<EventResponse>> getEventsByDateRange(
             @Parameter(description = "Calendar ID") @RequestParam String calendarId,
-            @Parameter(description = "Start time (ISO format)") @RequestParam LocalDateTime start,
-            @Parameter(description = "End time (ISO format)") @RequestParam LocalDateTime end) {
+            @Parameter(description = "Start time (ISO format; timezone-less values are treated as UTC)") @RequestParam Instant start,
+            @Parameter(description = "End time (ISO format; timezone-less values are treated as UTC)") @RequestParam Instant end) {
         return ResponseEntity
                 .status(HttpStatus.OK)
                 .body(eventService.getEventsByDateRange(calendarId, start, end));

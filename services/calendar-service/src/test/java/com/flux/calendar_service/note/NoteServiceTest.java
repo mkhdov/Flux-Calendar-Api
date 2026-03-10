@@ -13,7 +13,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -39,7 +39,7 @@ class NoteServiceTest {
     @InjectMocks
     private NoteService noteService;
 
-    private static final LocalDateTime NOW = LocalDateTime.now();
+    private static final Instant NOW = Instant.now();
 
     @Test
     void createNoteForEvent_ShouldReturnNoteResponse() {

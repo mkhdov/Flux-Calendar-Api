@@ -3,7 +3,7 @@ package com.flux.calendar_service.conference.dto;
 import com.flux.calendar_service.conference.Conference;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Schema(description = "Conference/meeting response with join link and metadata")
 public record ConferenceResponse(
@@ -18,7 +18,7 @@ public record ConferenceResponse(
         @Schema(description = "Password") String conferencePassword,
         @Schema(description = "Platform name") String platformName,
         @Schema(description = "Sync status") Conference.SyncStatus syncStatus,
-        @Schema(description = "Last sync time") LocalDateTime lastSynced,
-        @Schema(description = "Creation timestamp") LocalDateTime createdAt,
-        @Schema(description = "Last update timestamp") LocalDateTime updatedAt) {
+        @Schema(description = "Last sync time") Instant lastSynced,
+        @Schema(description = "Creation timestamp") Instant createdAt,
+        @Schema(description = "Last update timestamp") Instant updatedAt) {
 }

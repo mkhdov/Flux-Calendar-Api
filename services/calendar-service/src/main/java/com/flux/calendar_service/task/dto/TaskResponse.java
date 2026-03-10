@@ -7,8 +7,8 @@ import com.flux.calendar_service.note.dto.NoteResponse;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Schema(description = "Task response with full details including subtasks and notes")
@@ -21,9 +21,9 @@ public record TaskResponse(
         @Schema(description = "Current status") TaskStatus status,
         @Schema(description = "Priority level") TaskPriority priority,
         @Schema(description = "Due date") LocalDate date,
-        @Schema(description = "Deadline date and time") LocalDateTime deadline,
+        @Schema(description = "Deadline date and time") Instant deadline,
         @Schema(description = "List of subtasks") List<SubtaskResponse> subtasks,
         @Schema(description = "List of notes attached to the task") List<NoteResponse> notes,
-        @Schema(description = "Creation timestamp") LocalDateTime createdAt,
-        @Schema(description = "Last update timestamp") LocalDateTime updatedAt) {
+        @Schema(description = "Creation timestamp") Instant createdAt,
+        @Schema(description = "Last update timestamp") Instant updatedAt) {
 }
