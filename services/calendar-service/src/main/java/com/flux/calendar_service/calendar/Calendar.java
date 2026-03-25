@@ -60,7 +60,7 @@ public class Calendar {
     @Column(name = "is_primary")
     private boolean isPrimary;
 
-    @Column(name = "is_deleted", columnDefinition = "false")
+    @Column(name = "is_deleted", nullable = false)
     private boolean isDeleted;
 
     @Column(name = "created_at", updatable = false)

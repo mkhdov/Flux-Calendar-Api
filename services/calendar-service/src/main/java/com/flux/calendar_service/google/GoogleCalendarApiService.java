@@ -7,66 +7,79 @@ import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.gson.GsonFactory;
-import java.security.GeneralSecurityException;
 import com.google.api.services.calendar.Calendar;
 import com.google.api.services.calendar.model.*;
+
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @ConditionalOnProperty(name = "google.calendar.enabled", havingValue = "true", matchIfMissing = false)
 public class GoogleCalendarApiService {
+
         private final GoogleAuthService googleAuthService;
+
+        // FIX #1: HTTP transport created once at construction time, not on every request.
+        // Creating a new NetHttpTransport initializes a full SSL context and connection
+        // pool — doing this per API call is extremely wasteful and slow.
+        private final NetHttpTransport httpTransport;
+
         private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
 
+        // FIX #6: Renamed from 'calendarId' to 'targetCalendarId' to avoid
+        // confusion with the Google Calendar class imported above.
         @Value("${google.calendar.calendar-id:primary}")
-        private String calendarId;
+        private String targetCalendarId;
 
-        @Value("${google.calendar.application-name}")
+        @Value("${google.calendar.application-name:Flux Calendar Sync}")
         private String applicationName;
 
         @Autowired
         public GoogleCalendarApiService(GoogleAuthService googleAuthService) {
                 this.googleAuthService = googleAuthService;
+                // FIX #1: Initialize transport once — reused across all requests.
+                try {
+                        this.httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+                } catch (GeneralSecurityException | IOException e) {
+                        throw new RuntimeException("Failed to initialize Google HTTP transport", e);
+                }
         }
 
         private Calendar getCalendarClient(String userId) throws IOException {
-                // Try to lazy load
-                if (googleAuthService != null) {
-                        Credential credential = googleAuthService.getLoadedCredential(userId);
-                        if (credential != null) {
-                                try {
-                                        final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport
-                                                        .newTrustedTransport();
-                                        return new Calendar.Builder(HTTP_TRANSPORT, JSON_FACTORY, credential)
-                                                        .setApplicationName(applicationName)
-                                                        .build();
-                                } catch (GeneralSecurityException | IOException e) {
-                                        System.err.println(
-                                                        "❌ Failed to lazy-initialize Google Calendar client for user "
-                                                                        + userId + ": "
-                                                                        + e.getMessage());
-                                }
-                        }
+                if (googleAuthService == null) {
+                        throw new IOException("GoogleAuthService is not available");
                 }
 
-                throw new IOException("Google Calendar client is not initialized for user " + userId
-                                + ". Please authorize the application.");
+                Credential credential = googleAuthService.getValidCredential(userId);
+                if (credential == null) {
+                        throw new IOException("No valid credential found for user " + userId
+                                + ". Please re-authorize the application.");
+                }
+
+                // FIX #1: Reuse the shared httpTransport instead of creating a new one here.
+                return new Calendar.Builder(httpTransport, JSON_FACTORY, credential)
+                        .setApplicationName(applicationName)
+                        .build();
         }
 
         public String getPrimaryCalendarId(String userId) throws IOException {
                 CalendarListEntry primaryCalendar = getCalendarClient(userId)
-                                .calendarList()
-                                .get("primary")
-                                .execute();
+                        .calendarList()
+                        .get("primary")
+                        .execute();
 
                 if (primaryCalendar == null || primaryCalendar.getId() == null || primaryCalendar.getId().isBlank()) {
                         throw new IOException("Unable to resolve Google primary calendar ID for user " + userId);
@@ -83,499 +96,274 @@ public class GoogleCalendarApiService {
         // CREATE METHODS
         // ========================================================================
 
-        /**
-         * Create a simple event in Google Calendar
-         */
         public Event createEvent(String userId, String title, String description, Location location,
-                        Instant startTime, Instant endTime, String type) throws IOException {
+                                 Instant startTime, Instant endTime, String type) throws IOException {
 
                 Event event = new Event()
-                                .setSummary(title)
-                                .setDescription(description);
+                        .setSummary(title)
+                        .setDescription(description);
 
-                EventDateTime start = new EventDateTime()
-                                .setDateTime(convertToDateTime(startTime))
-                                .setTimeZone("UTC");
-                event.setStart(start);
+                event.setStart(timedDateTime(startTime));
+                event.setEnd(timedDateTime(endTime));
 
-                EventDateTime end = new EventDateTime()
-                                .setDateTime(convertToDateTime(endTime))
-                                .setTimeZone("UTC");
-                event.setEnd(end);
-
-                if(location != null) {
-                        String locationString = formatLocation(location);
-                        event.setLocation(locationString);
-                }
-
-                event.setColorId(defineColorId(type));
-
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-
-                event.setReminders(reminders);
-
-                Event createdEvent = getCalendarClient(userId).events()
-                                .insert(calendarId, event)
-                                .execute();
-
-                System.out.println("Event created for user " + userId + ": " + createdEvent.getHtmlLink());
-                return createdEvent;
-        }
-
-        private String formatLocation(Location location) {
                 if (location != null) {
-                        StringBuilder sb = new StringBuilder();
-                        sb.append(location.getPlaceName());
-
-                        if (location.getStreetAddress() != null && !location.getStreetAddress().isBlank()) {
-                                sb.append(", ").append(location.getStreetAddress());
-                        }
-                        if (location.getCity() != null && !location.getCity().isBlank()) {
-                                sb.append(", ").append(location.getCity());
-                        }
-                        if (location.getCountry() != null && !location.getCountry().isBlank()) {
-                                sb.append(", ").append(location.getCountry());
-                        }
-
-                        return sb.toString();
+                        event.setLocation(formatLocation(location));
                 }
-                return null;
+
+                event.setColorId(defineColorId(type));
+                event.setReminders(noReminders());
+
+                Event created = getCalendarClient(userId).events()
+                        .insert(targetCalendarId, event)
+                        .execute();
+
+                log.info("Event created for user {}: {}", userId, created.getHtmlLink());
+                return created;
         }
 
-        public Event createEventWithGoogleMeet(
-                        String userId,
-                        String title,
-                        String description,
-                        Location location,
-                        Instant startTime, Instant endTime,
-                        String type) throws IOException {
+        public Event createEventWithGoogleMeet(String userId, String title, String description,
+                                               Location location, Instant startTime, Instant endTime, String type) throws IOException {
 
                 Event event = new Event()
-                                .setSummary(title)
-                                .setDescription(description);
+                        .setSummary(title)
+                        .setDescription(description);
 
-
-                if(location != null) {
-                        String locationString = formatLocation(location);
-                        event.setLocation(locationString);
+                if (location != null) {
+                        event.setLocation(formatLocation(location));
                 }
 
-                // Start time
-                EventDateTime start = new EventDateTime()
-                                .setDateTime(convertToDateTime(startTime))
-                                .setTimeZone("UTC");
-                event.setStart(start);
-
-                // End time
-                EventDateTime end = new EventDateTime()
-                                .setDateTime(convertToDateTime(endTime))
-                                .setTimeZone("UTC");
-                event.setEnd(end);
-
-                // Color
+                event.setStart(timedDateTime(startTime));
+                event.setEnd(timedDateTime(endTime));
                 event.setColorId(defineColorId(type));
+                event.setReminders(noReminders());
+                event.setConferenceData(newMeetConferenceRequest());
 
-                // Reminders
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-                event.setReminders(reminders);
+                Event created = getCalendarClient(userId).events()
+                        .insert(targetCalendarId, event)
+                        .setConferenceDataVersion(1)
+                        .execute();
 
-                // ===============================
-                // GOOGLE MEET CONFERENCE
-                // ===============================
-                ConferenceSolutionKey conferenceSolutionKey = new ConferenceSolutionKey()
-                                .setType("hangoutsMeet");
-
-                CreateConferenceRequest createConferenceRequest = new CreateConferenceRequest()
-                                .setRequestId(UUID.randomUUID().toString())
-                                .setConferenceSolutionKey(conferenceSolutionKey);
-
-                ConferenceData conferenceData = new ConferenceData()
-                                .setCreateRequest(createConferenceRequest);
-
-                event.setConferenceData(conferenceData);
-
-                // Insert event WITH conferenceDataVersion
-                Event createdEvent = getCalendarClient(userId)
-                                .events()
-                                .insert(calendarId, event)
-                                .setConferenceDataVersion(1)
-                                .execute();
-
-                System.out.println("Event created with Google Meet:");
-                System.out.println("Event link: " + createdEvent.getHtmlLink());
-
-                if (createdEvent.getConferenceData() != null) {
-                        System.out.println("Google Meet link: "
-                                        + createdEvent.getConferenceData()
-                                                        .getEntryPoints()
-                                                        .get(0)
-                                                        .getUri());
-                }
-
-                return createdEvent;
+                log.info("Event created with Google Meet for user {}: {}", userId, created.getHtmlLink());
+                logMeetLinks(created);
+                return created;
         }
 
-        public Event addGoogleMeetToExistingEvent(
-                        String userId,
-                        String eventId) throws IOException {
+        public Event addGoogleMeetToExistingEvent(String userId, String eventId) throws IOException {
+                Event event = getCalendarClient(userId).events()
+                        .get(targetCalendarId, eventId)
+                        .execute();
 
-                // 1️⃣ Get existing event
-                Event event = getCalendarClient(userId)
-                                .events()
-                                .get(calendarId, eventId)
-                                .execute();
-
-                // 2️⃣ If event already has a Meet link → return it
                 if (event.getConferenceData() != null) {
+                        log.debug("Event {} already has conference data — skipping Meet creation", eventId);
                         return event;
                 }
 
-                // 3️⃣ Create conference request
-                ConferenceSolutionKey conferenceSolutionKey = new ConferenceSolutionKey()
-                                .setType("hangoutsMeet");
+                event.setConferenceData(newMeetConferenceRequest());
 
-                CreateConferenceRequest createConferenceRequest = new CreateConferenceRequest()
-                                .setRequestId(UUID.randomUUID().toString())
-                                .setConferenceSolutionKey(conferenceSolutionKey);
+                Event updated = getCalendarClient(userId).events()
+                        .update(targetCalendarId, eventId, event)
+                        .setConferenceDataVersion(1)
+                        .execute();
 
-                ConferenceData conferenceData = new ConferenceData()
-                                .setCreateRequest(createConferenceRequest);
-
-                event.setConferenceData(conferenceData);
-
-                // 4️⃣ Update event WITH conferenceDataVersion
-                Event updatedEvent = getCalendarClient(userId)
-                                .events()
-                                .update(calendarId, eventId, event)
-                                .setConferenceDataVersion(1)
-                                .execute();
-
-                System.out.println("Google Meet added to event:");
-                System.out.println("Event link: " + updatedEvent.getHtmlLink());
-
-                if (updatedEvent.getConferenceData() != null) {
-                        updatedEvent.getConferenceData()
-                                        .getEntryPoints()
-                                        .forEach(e -> System.out.println("Meet link: " + e.getUri()));
-                }
-
-                return updatedEvent;
-        }
-
-        private String defineColorId(String type) {
-                return switch (type) {
-                        case "OTHERS" -> "9";
-                        case "MEETING" -> "1";
-                        case "APPOINTMENT" -> "3";
-                        case "REMINDER" -> "4";
-                        case "BIRTHDAY" -> "6";
-                        case "HOLIDAY" -> "7";
-                        case "TASK" -> "5";
-                        case "STUDY" -> "11";
-                        case "WORK" -> "2";
-                        case "ROUTE" -> "8";
-                        default -> null;
-                };
-
+                log.info("Google Meet added to event {} for user {}", eventId, userId);
+                logMeetLinks(updated);
+                return updated;
         }
 
         /**
-         * Create a detailed event with location, attendees, and reminders
+         * Create an all-day event.
          */
-        public Event createDetailedEvent(String userId, String title, String description,
-                        Instant startTime, Instant endTime,
-                        String location, List<String> attendeeEmails, String type) throws IOException {
+        public Event createAllDayEvent(String userId, String title, String description,
+                                       Location location, Instant date) throws IOException {
 
                 Event event = new Event()
-                                .setSummary(title)
-                                .setDescription(description)
-                                .setLocation(location);
+                        .setSummary(title)
+                        .setDescription(description);
 
-                EventDateTime start = new EventDateTime()
-                                .setDateTime(convertToDateTime(startTime))
-                                .setTimeZone("UTC");
-                event.setStart(start);
+                // FIX #2: Always use UTC — consistent with createAllDayEventWithGoogleMeet
+                // and avoids wrong dates when pod timezone differs from UTC.
+                java.time.LocalDate startDate = date.atZone(ZoneId.of("UTC")).toLocalDate();
+                event.setStart(allDayDateTime(startDate));
+                event.setEnd(allDayDateTime(startDate.plusDays(1)));
+                event.setReminders(noReminders());
 
-                EventDateTime end = new EventDateTime()
-                                .setDateTime(convertToDateTime(endTime))
-                                .setTimeZone("UTC");
-                event.setEnd(end);
+                if (location != null) {
+                        event.setLocation(formatLocation(location));
+                }
+
+                Event created = getCalendarClient(userId).events()
+                        .insert(targetCalendarId, event)
+                        .execute();
+
+                log.info("All-day event created for user {}: {}", userId, created.getHtmlLink());
+                return created;
+        }
+
+        public Event createAllDayEventWithGoogleMeet(String userId, String title,
+                                                     String description, Instant date) throws IOException {
+
+                Event event = new Event()
+                        .setSummary(title)
+                        .setDescription(description);
+
+                // FIX #2: Was using ZoneId.systemDefault() — now consistently UTC.
+                java.time.LocalDate startDate = date.atZone(ZoneId.of("UTC")).toLocalDate();
+                event.setStart(allDayDateTime(startDate));
+                event.setEnd(allDayDateTime(startDate.plusDays(1)));
+                event.setReminders(noReminders());
+                event.setConferenceData(newMeetConferenceRequest());
+
+                Event created = getCalendarClient(userId).events()
+                        .insert(targetCalendarId, event)
+                        .setConferenceDataVersion(1)
+                        .execute();
+
+                log.info("All-day event with Google Meet created for user {}: {}", userId, created.getHtmlLink());
+                return created;
+        }
+
+        public Event createDetailedEvent(String userId, String title, String description,
+                                         Instant startTime, Instant endTime,
+                                         String location, List<String> attendeeEmails, String type) throws IOException {
+
+                Event event = new Event()
+                        .setSummary(title)
+                        .setDescription(description)
+                        .setLocation(location);
+
+                event.setStart(timedDateTime(startTime));
+                event.setEnd(timedDateTime(endTime));
                 event.setColorId(defineColorId(type));
 
-                // Add attendees
                 if (attendeeEmails != null && !attendeeEmails.isEmpty()) {
-                        List<EventAttendee> attendees = attendeeEmails.stream()
-                                        .map(email -> new EventAttendee().setEmail(email))
-                                        .collect(Collectors.toList());
-                        event.setAttendees(attendees);
+                        event.setAttendees(toAttendees(attendeeEmails));
                 }
 
-                // Add reminders
-                EventReminder[] reminderOverrides = new EventReminder[] {
+                Event.Reminders reminders = new Event.Reminders()
+                        .setUseDefault(false)
+                        .setOverrides(Arrays.asList(
                                 new EventReminder().setMethod("email").setMinutes(24 * 60),
-                                new EventReminder().setMethod("popup").setMinutes(30),
-                };
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(Arrays.asList(reminderOverrides));
+                                new EventReminder().setMethod("popup").setMinutes(30)));
                 event.setReminders(reminders);
 
-                // Send notifications to attendees
-                Event createdEvent = getCalendarClient(userId).events()
-                                .insert(calendarId, event)
-                                .setSendNotifications(true)
-                                .execute();
+                Event created = getCalendarClient(userId).events()
+                        .insert(targetCalendarId, event)
+                        .setSendNotifications(true)
+                        .execute();
 
-                System.out.println("Detailed event created for user " + userId + ": " + createdEvent.getHtmlLink());
-                return createdEvent;
+                log.info("Detailed event created for user {}: {}", userId, created.getHtmlLink());
+                return created;
         }
 
-        /**
-         * Create an all-day event
-         */
-        public Event createAllDayEvent(String userId, String title, String description, Location location,
-                        Instant date) throws IOException {
-
-                Event event = new Event()
-                                .setSummary(title)
-                                .setDescription(description);
-
-                java.time.LocalDate startDate = date.atZone(ZoneId.of("UTC")).toLocalDate();
-                java.time.LocalDate endDate = startDate.plusDays(1);
-
-                // For all-day events, use date instead of dateTime
-                EventDateTime start = new EventDateTime()
-                                .setDate(new DateTime(startDate.toString()));
-                event.setStart(start);
-
-                EventDateTime end = new EventDateTime()
-                                .setDate(new DateTime(endDate.toString()));
-                event.setEnd(end);
-
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-
-                event.setReminders(reminders);
-                if(location != null) {
-                        String locationString = formatLocation(location);
-                        event.setLocation(locationString);
-                }
-
-                Event createdEvent = getCalendarClient(userId).events()
-                                .insert(calendarId, event)
-                                .execute();
-
-                System.out.println("All-day event created for user " + userId + ": " + createdEvent.getHtmlLink());
-                return createdEvent;
-        }
-
-        public Event createAllDayEventWithGoogleMeet(String userId, String title, String description,
-                        Instant date) throws IOException {
-
-                Event event = new Event()
-                                .setSummary(title)
-                                .setDescription(description);
-
-                java.time.LocalDate startDate = date.atZone(ZoneId.systemDefault()).toLocalDate();
-                java.time.LocalDate endDate = startDate.plusDays(1);
-
-                EventDateTime start = new EventDateTime()
-                                .setDate(new DateTime(startDate.toString()));
-                event.setStart(start);
-
-                EventDateTime end = new EventDateTime()
-                                .setDate(new DateTime(endDate.toString()));
-                event.setEnd(end);
-
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-                event.setReminders(reminders);
-
-                ConferenceSolutionKey conferenceSolutionKey = new ConferenceSolutionKey()
-                                .setType("hangoutsMeet");
-                CreateConferenceRequest createConferenceRequest = new CreateConferenceRequest()
-                                .setRequestId(UUID.randomUUID().toString())
-                                .setConferenceSolutionKey(conferenceSolutionKey);
-                event.setConferenceData(new ConferenceData().setCreateRequest(createConferenceRequest));
-
-                Event createdEvent = getCalendarClient(userId).events()
-                                .insert(calendarId, event)
-                                .setConferenceDataVersion(1)
-                                .execute();
-
-                System.out.println("All-day event with Google Meet created for user " + userId + ": "
-                                + createdEvent.getHtmlLink());
-                return createdEvent;
-        }
-
-        /**
-         * Create a recurring event
-         */
         public Event createRecurringEvent(String userId, String title, String description,
-                        Instant startTime, Instant endTime,
-                        String recurrenceRule) throws IOException {
+                                          Instant startTime, Instant endTime, String recurrenceRule) throws IOException {
 
                 Event event = new Event()
-                                .setSummary(title)
-                                .setDescription(description);
+                        .setSummary(title)
+                        .setDescription(description);
 
-                EventDateTime start = new EventDateTime()
-                                .setDateTime(convertToDateTime(startTime))
-                                .setTimeZone("UTC");
-                event.setStart(start);
-
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-
-                event.setReminders(reminders);
-
-                EventDateTime end = new EventDateTime()
-                                .setDateTime(convertToDateTime(endTime))
-                                .setTimeZone("UTC");
-                event.setEnd(end);
-
-                // Recurrence rule examples:
-                // Daily: "RRULE:FREQ=DAILY;COUNT=10"
-                // Weekly on Monday: "RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10"
-                // Monthly: "RRULE:FREQ=MONTHLY;COUNT=6"
+                event.setStart(timedDateTime(startTime));
+                event.setEnd(timedDateTime(endTime));
+                event.setReminders(noReminders());
                 event.setRecurrence(Arrays.asList(recurrenceRule));
 
-                Event createdEvent = getCalendarClient(userId).events()
-                                .insert(calendarId, event)
-                                .execute();
+                Event created = getCalendarClient(userId).events()
+                        .insert(targetCalendarId, event)
+                        .execute();
 
-                System.out.println("Recurring event created for user " + userId + ": " + createdEvent.getHtmlLink());
-                return createdEvent;
+                log.info("Recurring event created for user {}: {}", userId, created.getHtmlLink());
+                return created;
         }
 
         // ========================================================================
-        // READ/GET METHODS
+        // READ / GET METHODS
         // ========================================================================
 
-        /**
-         * Get a single event by ID
-         */
         public Event getEventById(String userId, String eventId) throws IOException {
                 Event event = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
-
-                System.out.println("Retrieved event for user " + userId + ": " + event.getSummary());
+                        .get(targetCalendarId, eventId)
+                        .execute();
+                log.debug("Retrieved event {} for user {}: {}", eventId, userId, event.getSummary());
                 return event;
         }
 
-        /**
-         * Get all events (paginated)
-         */
         public List<Event> getAllEvents(String userId) throws IOException {
                 List<Event> allEvents = new ArrayList<>();
                 String pageToken = null;
 
                 do {
                         Events events = getCalendarClient(userId).events()
-                                        .list(calendarId)
-                                        .setPageToken(pageToken)
-                                        .execute();
-
+                                .list(targetCalendarId)
+                                .setPageToken(pageToken)
+                                .execute();
                         allEvents.addAll(events.getItems());
                         pageToken = events.getNextPageToken();
-
                 } while (pageToken != null);
 
-                System.out.println("Retrieved " + allEvents.size() + " events for user " + userId);
+                log.info("Retrieved {} events for user {}", allEvents.size(), userId);
                 return allEvents;
         }
 
-        /**
-         * Get events within a date range
-         */
-        public List<Event> getEventsByDateRange(String userId, Instant startDate,
-                        Instant endDate) throws IOException {
-
-                DateTime timeMin = convertToDateTime(startDate);
-                DateTime timeMax = convertToDateTime(endDate);
-
+        public List<Event> getEventsByDateRange(String userId, Instant startDate, Instant endDate) throws IOException {
                 Events events = getCalendarClient(userId).events()
-                                .list(calendarId)
-                                .setTimeMin(timeMin)
-                                .setTimeMax(timeMax)
-                                .setOrderBy("startTime")
-                                .setSingleEvents(true)
-                                .execute();
+                        .list(targetCalendarId)
+                        .setTimeMin(toDateTime(startDate))
+                        .setTimeMax(toDateTime(endDate))
+                        .setOrderBy("startTime")
+                        .setSingleEvents(true)
+                        .execute();
 
                 List<Event> items = events.getItems();
-                System.out.println("Retrieved " + items.size() + " events in date range for user " + userId);
+                log.info("Retrieved {} events in date range for user {}", items.size(), userId);
                 return items;
         }
 
-        /**
-         * Get upcoming events (next N events)
-         */
         public List<Event> getUpcomingEvents(String userId, int maxResults) throws IOException {
-                DateTime now = new DateTime(System.currentTimeMillis());
-
                 Events events = getCalendarClient(userId).events()
-                                .list(calendarId)
-                                .setMaxResults(maxResults)
-                                .setTimeMin(now)
-                                .setOrderBy("startTime")
-                                .setSingleEvents(true)
-                                .execute();
+                        .list(targetCalendarId)
+                        .setMaxResults(maxResults)
+                        .setTimeMin(toDateTime(Instant.now()))
+                        .setOrderBy("startTime")
+                        .setSingleEvents(true)
+                        .execute();
 
                 List<Event> items = events.getItems();
-                System.out.println("Retrieved " + items.size() + " upcoming events for user " + userId);
+                log.info("Retrieved {} upcoming events for user {}", items.size(), userId);
                 return items;
         }
 
-        /**
-         * Search events by text query
-         */
         public List<Event> searchEvents(String userId, String searchQuery) throws IOException {
                 Events events = getCalendarClient(userId).events()
-                                .list(calendarId)
-                                .setQ(searchQuery)
-                                .execute();
+                        .list(targetCalendarId)
+                        .setQ(searchQuery)
+                        .execute();
 
                 List<Event> items = events.getItems();
-                System.out.println(
-                                "Found " + items.size() + " events matching: " + searchQuery + " for user " + userId);
+                log.info("Found {} events matching '{}' for user {}", items.size(), searchQuery, userId);
                 return items;
         }
 
-        /**
-         * Get events updated/modified after a specific time
-         */
         public List<Event> getUpdatedEvents(String userId, Instant updatedMin) throws IOException {
-                DateTime updateTime = convertToDateTime(updatedMin);
-
                 Events events = getCalendarClient(userId).events()
-                                .list(calendarId)
-                                .setUpdatedMin(updateTime)
-                                .execute();
+                        .list(targetCalendarId)
+                        .setUpdatedMin(toDateTime(updatedMin))
+                        .execute();
 
                 List<Event> items = events.getItems();
-                System.out.println("Retrieved " + items.size() + " updated events for user " + userId);
+                log.info("Retrieved {} updated events for user {}", items.size(), userId);
                 return items;
         }
 
-        /**
-         * Get events with incremental sync (using sync token)
-         */
         public EventsResult getEventsWithSyncToken(String userId, String syncToken) throws IOException {
-                Calendar.Events.List request = getCalendarClient(userId).events().list(calendarId);
+                Calendar.Events.List request = getCalendarClient(userId).events().list(targetCalendarId);
 
                 if (syncToken != null) {
                         request.setSyncToken(syncToken);
                 } else {
-                        // Initial sync - get events from last 30 days
-                        request.setTimeMin(new DateTime(System.currentTimeMillis() - 2592000000L));
+                        // FIX #3: Replaced hardcoded magic number 2592000000L with a readable
+                        // duration expression. Both mean 30 days but this is self-documenting
+                        // and safe from typos.
+                        request.setTimeMin(toDateTime(Instant.now().minus(30, ChronoUnit.DAYS)));
                 }
 
                 List<Event> allEvents = new ArrayList<>();
@@ -587,7 +375,7 @@ public class GoogleCalendarApiService {
                         request.setPageToken(events.getNextPageToken());
                 } while (events.getNextPageToken() != null);
 
-                System.out.println("Incremental sync retrieved " + allEvents.size() + " events for user " + userId);
+                log.info("Incremental sync retrieved {} events for user {}", allEvents.size(), userId);
                 return new EventsResult(allEvents, events.getNextSyncToken());
         }
 
@@ -595,242 +383,170 @@ public class GoogleCalendarApiService {
         // UPDATE METHODS
         // ========================================================================
 
-        /**
-         * Update an event's basic information
-         */
-        public Event updateEvent(String userId, String eventId, String newTitle,
-                        String newDescription) throws IOException {
+        public Event updateEvent(String userId, String eventId,
+                                 String newTitle, String newDescription) throws IOException {
 
-                // First, retrieve the existing event
-                Event event = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
+                Event event = new Event()
+                        .setSummary(newTitle)
+                        .setDescription(newDescription)
+                        .setReminders(noReminders());
 
-                // Update fields
-                event.setSummary(newTitle);
-                event.setDescription(newDescription);
+                Event updated = getCalendarClient(userId).events()
+                        .patch(targetCalendarId, eventId, event)
+                        .execute();
 
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-
-                event.setReminders(reminders);
-
-                // Update the event
-                Event updatedEvent = getCalendarClient(userId).events()
-                                .update(calendarId, eventId, event)
-                                .execute();
-
-                System.out.println("Event updated for user " + userId + ": " + updatedEvent.getSummary());
-                return updatedEvent;
+                log.info("Event {} patched for user {}: {}", eventId, userId, updated.getSummary());
+                return updated;
         }
 
-        /**
-         * Update event date and time
-         */
         public Event updateEventDateTime(String userId, String eventId,
-                        Instant newStartTime,
-                        Instant newEndTime) throws IOException {
+                                         Instant newStartTime, Instant newEndTime) throws IOException {
 
-                Event event = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
+                Event event = new Event()
+                        .setStart(timedDateTime(newStartTime))
+                        .setEnd(timedDateTime(newEndTime))
+                        .setReminders(noReminders());
 
-                EventDateTime start = new EventDateTime()
-                                .setDateTime(convertToDateTime(newStartTime))
-                                .setTimeZone("UTC");
-                event.setStart(start);
+                Event updated = getCalendarClient(userId).events()
+                        .patch(targetCalendarId, eventId, event)
+                        .setSendNotifications(true)
+                        .execute();
 
-                EventDateTime end = new EventDateTime()
-                                .setDateTime(convertToDateTime(newEndTime))
-                                .setTimeZone("UTC");
-                event.setEnd(end);
-
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-
-                event.setReminders(reminders);
-                Event updatedEvent = getCalendarClient(userId).events()
-                                .update(calendarId, eventId, event)
-                                .setSendNotifications(true)
-                                .execute();
-
-                System.out.println("Event time updated for user " + userId + ": " + updatedEvent.getSummary());
-                return updatedEvent;
+                log.info("Event {} time patched for user {}", eventId, userId);
+                return updated;
         }
 
-        /**
-         * Update event location
-         */
         public Event updateEventLocation(String userId, String eventId, Location location) throws IOException {
-                Event event = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
+                Event event = new Event()
+                        .setLocation(formatLocation(location))
+                        .setReminders(noReminders());
 
-                String locationString = formatLocation(location);
-                event.setLocation(locationString);
+                Event updated = getCalendarClient(userId).events()
+                        .patch(targetCalendarId, eventId, event)
+                        .setSendNotifications(true)
+                        .execute();
 
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-
-                event.setReminders(reminders);
-                Event updatedEvent = getCalendarClient(userId).events()
-                                .update(calendarId, eventId, event)
-                                .setSendNotifications(true)
-                                .execute();
-
-                System.out.println("Event location updated for user " + userId + ": " + updatedEvent.getLocation());
-                return updatedEvent;
+                log.info("Event {} location patched for user {}: {}", eventId, userId, updated.getLocation());
+                return updated;
         }
 
-        /**
-         * Update complete event with all details
-         */
         public Event updateCompleteEvent(String userId, String eventId, String title, String description,
-                        Instant startTime, Instant endTime,
-                        String location, List<String> attendeeEmails) throws IOException {
+                                         Instant startTime, Instant endTime, boolean isAllDay,
+                                         String location, List<String> attendeeEmails) throws IOException {
 
-                Event event = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
+                Event event = new Event()
+                        .setSummary(title)
+                        .setDescription(description)
+                        .setLocation(location);
+                
+                if (isAllDay) {
+                        java.time.LocalDate startDate = startTime.atZone(ZoneId.of("UTC")).toLocalDate();
+                        event.setStart(allDayDateTime(startDate));
+                        event.setEnd(allDayDateTime(startDate.plusDays(1)));
+                } else {
+                        event.setStart(timedDateTime(startTime));
+                        event.setEnd(timedDateTime(endTime));
+                }
+                event.setReminders(noReminders());
 
-                event.setSummary(title);
-                event.setDescription(description);
-                event.setLocation(location);
-
-                EventDateTime start = new EventDateTime()
-                                .setDateTime(convertToDateTime(startTime))
-                                .setTimeZone("UTC");
-                event.setStart(start);
-
-                EventDateTime end = new EventDateTime()
-                                .setDateTime(convertToDateTime(endTime))
-                                .setTimeZone("UTC");
-                event.setEnd(end);
-                Event.Reminders reminders = new Event.Reminders()
-                                .setUseDefault(false)
-                                .setOverrides(new ArrayList<>());
-
-                event.setReminders(reminders);
                 if (attendeeEmails != null && !attendeeEmails.isEmpty()) {
-                        List<EventAttendee> attendees = attendeeEmails.stream()
-                                        .map(email -> new EventAttendee().setEmail(email))
-                                        .collect(Collectors.toList());
-                        event.setAttendees(attendees);
+                        event.setAttendees(toAttendees(attendeeEmails));
                 }
 
-                Event updatedEvent = getCalendarClient(userId).events()
-                                .update(calendarId, eventId, event)
-                                .setSendNotifications(true)
-                                .execute();
+                Event updated = getCalendarClient(userId).events()
+                        .patch(targetCalendarId, eventId, event)
+                        .setSendNotifications(true)
+                        .execute();
 
-                System.out.println("Complete event updated for user " + userId + ": " + updatedEvent.getSummary());
-                return updatedEvent;
+                log.info("Complete event {} patched for user {}: {}", eventId, userId, updated.getSummary());
+                return updated;
         }
 
+        /**
+         * Removes conference data (Google Meet) from an event.
+         *
+         * FIX #4: Setting conferenceData to null in a Google API update is a no-op —
+         * Google treats null fields as "unchanged" in partial updates.
+         * The only reliable way to signal removal is to send an explicit PATCH
+         * with an empty ConferenceData object and conferenceDataVersion=1.
+         * This makes the intent visible to the API rather than silently doing nothing.
+         */
         public Event removeConfrenceFromEvent(String userId, String eventId) throws IOException {
-
                 Event event = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
+                        .get(targetCalendarId, eventId)
+                        .execute();
 
-                event.setConferenceData(null);
+                // Send an empty ConferenceData to explicitly clear the meeting.
+                // A null value is ignored by Google's partial update semantics.
+                event.setConferenceData(new ConferenceData());
 
-                Event updatedEvent = getCalendarClient(userId).events()
-                                .update(calendarId, eventId, event)
-                                .setConferenceDataVersion(1)
-                                .setSendNotifications(true)
-                                .execute();
+                Event updated = getCalendarClient(userId).events()
+                        .patch(targetCalendarId, eventId, event)
+                        .setConferenceDataVersion(1)
+                        .setSendNotifications(true)
+                        .execute();
 
-                System.out.println("Complete event updated for user " + userId + ": " + updatedEvent.getSummary());
-                return updatedEvent;
+                log.info("Conference data removed from event {} for user {}", eventId, userId);
+                return updated;
         }
 
-        /**
-         * Add attendees to an existing event
-         */
-        public Event addAttendeesToEvent(String userId, String eventId, List<String> newAttendeeEmails)
-                        throws IOException {
-                Event event = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
+//        Getting error that is why i commented it just because it is unnecary piece of code never used
+//        public Event addAttendeesToEvent(String userId, String eventId,
+//                                         List<String> newAttendeeEmails) throws IOException {
+//
+//                Event event = getCalendarClient(userId).events()
+//                        .get(targetCalendarId, eventId)
+//                        .execute();
+//
+//                List<EventAttendee> existing = event.getAttendees();
+//                if (existing == null) {
+//                        existing = new ArrayList<>();
+//                }
+//                newAttendeeEmails.forEach(email -> existing.add(new EventAttendee().setEmail(email)));
+//                event.setAttendees(existing);
+//
+//                Event updated = getCalendarClient(userId).events()
+//                        .update(targetCalendarId, eventId, event)
+//                        .setSendNotifications(true)
+//                        .execute();
+//
+//                log.info("Attendees added to event {} for user {}", eventId, userId);
+//                return updated;
+//        }
 
-                List<EventAttendee> existingAttendees = event.getAttendees();
-                if (existingAttendees == null) {
-                        existingAttendees = new ArrayList<>();
-                }
-
-                for (String email : newAttendeeEmails) {
-                        existingAttendees.add(new EventAttendee().setEmail(email));
-                }
-                event.setAttendees(existingAttendees);
-
-                Event updatedEvent = getCalendarClient(userId).events()
-                                .update(calendarId, eventId, event)
-                                .setSendNotifications(true)
-                                .execute();
-
-                System.out.println("Attendees added to event for user " + userId + ": " + updatedEvent.getSummary());
-                return updatedEvent;
-        }
-
-        /**
-         * Update event color
-         */
         public Event updateEventColor(String userId, String eventId, String colorId) throws IOException {
-                // Color IDs: 1=Lavender, 2=Sage, 3=Grape, 4=Flamingo, 5=Banana,
-                // 6=Tangerine, 7=Peacock, 8=Graphite, 9=Blueberry, 10=Basil, 11=Tomato
+                Event event = new Event()
+                        .setColorId(colorId);
 
-                Event event = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
+                Event updated = getCalendarClient(userId).events()
+                        .patch(targetCalendarId, eventId, event)
+                        .execute();
 
-                event.setColorId(colorId);
-
-                Event updatedEvent = getCalendarClient(userId).events()
-                                .update(calendarId, eventId, event)
-                                .execute();
-
-                System.out.println("Event color updated for user " + userId + ": " + updatedEvent.getSummary());
-                return updatedEvent;
+                log.info("Event {} color patched for user {}", eventId, userId);
+                return updated;
         }
 
         // ========================================================================
         // DELETE METHODS
         // ========================================================================
 
-        /**
-         * Delete an event permanently
-         */
         public void deleteEvent(String userId, String eventId) throws IOException {
                 getCalendarClient(userId).events()
-                                .delete(calendarId, eventId)
-                                .setSendNotifications(true)
-                                .execute();
-
-                System.out.println("Event deleted for user " + userId + ": " + eventId);
+                        .delete(targetCalendarId, eventId)
+                        .setSendNotifications(true)
+                        .execute();
+                log.info("Event {} deleted for user {}", eventId, userId);
         }
 
-        /**
-         * Delete event without sending notifications
-         */
         public void deleteEventSilently(String userId, String eventId) throws IOException {
                 getCalendarClient(userId).events()
-                                .delete(calendarId, eventId)
-                                .setSendNotifications(false)
-                                .execute();
-
-                System.out.println("Event deleted silently for user " + userId + ": " + eventId);
+                        .delete(targetCalendarId, eventId)
+                        .setSendNotifications(false)
+                        .execute();
+                log.info("Event {} deleted silently for user {}", eventId, userId);
         }
 
-        /**
-         * Delete all events in a date range
-         */
-        public int deleteEventsByDateRange(String userId, Instant startDate,
-                        Instant endDate) throws IOException {
-
+        public int deleteEventsByDateRange(String userId, Instant startDate, Instant endDate) throws IOException {
                 List<Event> events = getEventsByDateRange(userId, startDate, endDate);
                 int deletedCount = 0;
 
@@ -839,121 +555,96 @@ public class GoogleCalendarApiService {
                                 deleteEvent(userId, event.getId());
                                 deletedCount++;
                         } catch (IOException e) {
-                                System.err.println("Failed to delete event: " + event.getId() + " for user " + userId);
+                                log.error("Failed to delete event {} for user {}", event.getId(), userId, e);
                         }
                 }
 
-                System.out.println("Deleted " + deletedCount + " events for user " + userId);
+                log.info("Deleted {} events for user {}", deletedCount, userId);
                 return deletedCount;
         }
 
-        /**
-         * Cancel a recurring event (all instances)
-         */
         public void cancelRecurringEvent(String userId, String recurringEventId) throws IOException {
                 Event event = getCalendarClient(userId).events()
-                                .get(calendarId, recurringEventId)
-                                .execute();
+                        .get(targetCalendarId, recurringEventId)
+                        .execute();
 
                 event.setStatus("cancelled");
 
                 getCalendarClient(userId).events()
-                                .update(calendarId, recurringEventId, event)
-                                .setSendNotifications(true)
-                                .execute();
+                        .update(targetCalendarId, recurringEventId, event)
+                        .setSendNotifications(true)
+                        .execute();
 
-                System.out.println("Recurring event cancelled for user " + userId + ": " + recurringEventId);
+                log.info("Recurring event {} cancelled for user {}", recurringEventId, userId);
         }
 
-        /**
-         * Delete a single instance of a recurring event
-         */
         public void deleteRecurringEventInstance(String userId, String recurringEventId,
-                        String instanceId) throws IOException {
+                                                 String instanceId) throws IOException {
 
                 getCalendarClient(userId).events()
-                                .delete(calendarId, instanceId)
-                                .setSendNotifications(true)
-                                .execute();
+                        .delete(targetCalendarId, instanceId)
+                        .setSendNotifications(true)
+                        .execute();
 
-                System.out.println("Recurring event instance deleted for user " + userId + ": " + instanceId);
+                log.info("Recurring event instance {} deleted for user {}", instanceId, userId);
         }
 
         // ========================================================================
-        // MOVE/COPY METHODS
+        // MOVE / COPY METHODS
         // ========================================================================
 
-        /**
-         * Move event to another calendar
-         */
-        public Event moveEventToCalendar(String userId, String eventId, String destinationCalendarId)
-                        throws IOException {
-                Event movedEvent = getCalendarClient(userId).events()
-                                .move(calendarId, eventId, destinationCalendarId)
-                                .setSendNotifications(true)
-                                .execute();
+        public Event moveEventToCalendar(String userId, String eventId,
+                                         String destinationCalendarId) throws IOException {
 
-                System.out.println("Event moved to calendar: " + destinationCalendarId + " for user " + userId);
-                return movedEvent;
+                Event moved = getCalendarClient(userId).events()
+                        .move(targetCalendarId, eventId, destinationCalendarId)
+                        .setSendNotifications(true)
+                        .execute();
+
+                log.info("Event {} moved to calendar {} for user {}", eventId, destinationCalendarId, userId);
+                return moved;
         }
 
-        /**
-         * Copy/duplicate an event
-         */
         public Event duplicateEvent(String userId, String eventId) throws IOException {
-                Event originalEvent = getCalendarClient(userId).events()
-                                .get(calendarId, eventId)
-                                .execute();
+                Event original = getCalendarClient(userId).events()
+                        .get(targetCalendarId, eventId)
+                        .execute();
 
-                // Create a new event with same details
-                Event newEvent = new Event()
-                                .setSummary(originalEvent.getSummary() + " (Copy)")
-                                .setDescription(originalEvent.getDescription())
-                                .setLocation(originalEvent.getLocation())
-                                .setStart(originalEvent.getStart())
-                                .setEnd(originalEvent.getEnd());
+                Event copy = new Event()
+                        .setSummary(original.getSummary() + " (Copy)")
+                        .setDescription(original.getDescription())
+                        .setLocation(original.getLocation())
+                        .setStart(original.getStart())
+                        .setEnd(original.getEnd());
 
-                Event duplicatedEvent = getCalendarClient(userId).events()
-                                .insert(calendarId, newEvent)
-                                .execute();
+                Event duplicated = getCalendarClient(userId).events()
+                        .insert(targetCalendarId, copy)
+                        .execute();
 
-                System.out.println("Event duplicated for user " + userId + ": " + duplicatedEvent.getId());
-                return duplicatedEvent;
+                log.info("Event {} duplicated as {} for user {}", eventId, duplicated.getId(), userId);
+                return duplicated;
         }
 
         // ========================================================================
         // BATCH OPERATIONS
         // ========================================================================
 
-        /**
-         * Create multiple events in batch
-         */
         public List<Event> createMultipleEvents(String userId, List<EventData> eventDataList) throws IOException {
-                List<Event> createdEvents = new ArrayList<>();
+                List<Event> created = new ArrayList<>();
 
                 for (EventData data : eventDataList) {
                         try {
-                                Event event = createEvent(
-                                                userId,
-                                                data.title,
-                                                data.description,
-                                                null,
-                                                data.startTime,
-                                                data.endTime,
-                                                data.type);
-                                createdEvents.add(event);
+                                created.add(createEvent(userId, data.title, data.description,
+                                        null, data.startTime, data.endTime, data.type));
                         } catch (IOException e) {
-                                System.err.println("Failed to create event: " + data.title + " for user " + userId);
+                                log.error("Failed to create batch event '{}' for user {}", data.title, userId, e);
                         }
                 }
 
-                System.out.println("Created " + createdEvents.size() + " events in batch for user " + userId);
-                return createdEvents;
+                log.info("Created {}/{} events in batch for user {}", created.size(), eventDataList.size(), userId);
+                return created;
         }
 
-        /**
-         * Delete multiple events by IDs
-         */
         public int deleteMultipleEvents(String userId, List<String> eventIds) throws IOException {
                 int deletedCount = 0;
 
@@ -962,53 +653,136 @@ public class GoogleCalendarApiService {
                                 deleteEvent(userId, eventId);
                                 deletedCount++;
                         } catch (IOException e) {
-                                System.err.println("Failed to delete event: " + eventId + " for user " + userId);
+                                log.error("Failed to delete event {} for user {}", eventId, userId, e);
                         }
                 }
 
-                System.out.println("Deleted " + deletedCount + " events for user " + userId);
+                log.info("Deleted {}/{} events for user {}", deletedCount, eventIds.size(), userId);
                 return deletedCount;
         }
 
         // ========================================================================
-        // CALENDAR MANAGEMENT METHODS
+        // CALENDAR MANAGEMENT
         // ========================================================================
 
-        /**
-         * List all calendars
-         */
         public List<CalendarListEntry> listAllCalendars(String userId) throws IOException {
                 CalendarList calendarList = getCalendarClient(userId).calendarList().list().execute();
                 List<CalendarListEntry> items = calendarList.getItems();
 
-                System.out.println("Found " + items.size() + " calendars for user " + userId);
-                for (CalendarListEntry calendar : items) {
-                        System.out.println("Calendar: " + calendar.getSummary() + " (ID: " + calendar.getId() + ")");
-                }
-
+                log.info("Found {} calendars for user {}", items.size(), userId);
+                items.forEach(c -> log.debug("Calendar: {} (ID: {})", c.getSummary(), c.getId()));
                 return items;
         }
 
-        /**
-         * Get calendar details
-         */
         public com.google.api.services.calendar.model.Calendar getCalendarDetails(String userId) throws IOException {
-                com.google.api.services.calendar.model.Calendar calendar = getCalendarClient(userId).calendars()
-                                .get(calendarId)
-                                .execute();
+                com.google.api.services.calendar.model.Calendar calendar = getCalendarClient(userId)
+                        .calendars()
+                        .get(targetCalendarId)
+                        .execute();
 
-                System.out.println("Calendar: " + calendar.getSummary() + " for user " + userId);
-                System.out.println("Timezone: " + calendar.getTimeZone());
+                log.info("Calendar '{}' retrieved for user {} (timezone: {})",
+                        calendar.getSummary(), userId, calendar.getTimeZone());
                 return calendar;
         }
 
         // ========================================================================
-        // HELPER CLASSES AND METHODS
+        // PRIVATE HELPERS
         // ========================================================================
 
         /**
-         * Helper class for batch event creation
+         * Timed event DateTime — always UTC.
          */
+        private EventDateTime timedDateTime(Instant instant) {
+                return new EventDateTime()
+                        .setDateTime(toDateTime(instant))
+                        .setTimeZone("UTC");
+        }
+
+        /**
+         * All-day event DateTime — date only, no time component.
+         */
+        private EventDateTime allDayDateTime(java.time.LocalDate date) {
+                return new EventDateTime().setDate(new DateTime(date.toString()));
+        }
+
+        /**
+         * Converts Instant to Google DateTime.
+         */
+        private DateTime toDateTime(Instant instant) {
+                return new DateTime(Date.from(instant));
+        }
+
+        /**
+         * Standard empty reminders block — prevents Google from applying
+         * calendar defaults which can cause unwanted notification spam.
+         */
+        private Event.Reminders noReminders() {
+                return new Event.Reminders()
+                        .setUseDefault(false)
+                        .setOverrides(new ArrayList<>());
+        }
+
+        /**
+         * Builds a new Google Meet conference request with a unique request ID.
+         */
+        private ConferenceData newMeetConferenceRequest() {
+                return new ConferenceData()
+                        .setCreateRequest(new CreateConferenceRequest()
+                                .setRequestId(UUID.randomUUID().toString())
+                                .setConferenceSolutionKey(new ConferenceSolutionKey().setType("hangoutsMeet")));
+        }
+
+        /**
+         * Converts a list of email strings to Google EventAttendee objects.
+         */
+        private List<EventAttendee> toAttendees(List<String> emails) {
+                return emails.stream()
+                        .map(email -> new EventAttendee().setEmail(email))
+                        .collect(Collectors.toList());
+        }
+
+        private String formatLocation(Location location) {
+                if (location == null) return null;
+
+                StringBuilder sb = new StringBuilder();
+                if (location.getPlaceName() != null) sb.append(location.getPlaceName());
+                if (location.getStreetAddress() != null && !location.getStreetAddress().isBlank())
+                        sb.append(", ").append(location.getStreetAddress());
+                if (location.getCity() != null && !location.getCity().isBlank())
+                        sb.append(", ").append(location.getCity());
+                if (location.getCountry() != null && !location.getCountry().isBlank())
+                        sb.append(", ").append(location.getCountry());
+                return sb.toString();
+        }
+
+        private String defineColorId(String type) {
+                if (type == null) return null;
+                return switch (type) {
+                        case "MEETING"     -> "1";
+                        case "WORK"        -> "2";
+                        case "APPOINTMENT" -> "3";
+                        case "REMINDER"    -> "4";
+                        case "TASK"        -> "5";
+                        case "BIRTHDAY"    -> "6";
+                        case "HOLIDAY"     -> "7";
+                        case "ROUTE"       -> "8";
+                        case "OTHERS"      -> "9";
+                        case "STUDY"       -> "11";
+                        default            -> null;
+                };
+        }
+
+        private void logMeetLinks(Event event) {
+                if (event.getConferenceData() != null && event.getConferenceData().getEntryPoints() != null) {
+                        event.getConferenceData().getEntryPoints()
+                                .forEach(ep -> log.info("Meet entry point [{}]: {}", ep.getEntryPointType(), ep.getUri()));
+                }
+        }
+
+        // ========================================================================
+        // HELPER CLASSES
+        // ========================================================================
+
         public static class EventData {
                 public String title;
                 public String description;
@@ -1016,8 +790,7 @@ public class GoogleCalendarApiService {
                 public Instant endTime;
                 public String type;
 
-                public EventData(String title, String description,
-                                Instant startTime, Instant endTime) {
+                public EventData(String title, String description, Instant startTime, Instant endTime) {
                         this.title = title;
                         this.description = description;
                         this.startTime = startTime;
@@ -1025,9 +798,6 @@ public class GoogleCalendarApiService {
                 }
         }
 
-        /**
-         * Helper class for sync token results
-         */
         public static class EventsResult {
                 private final List<Event> events;
                 private final String nextSyncToken;
@@ -1044,35 +814,5 @@ public class GoogleCalendarApiService {
                 public String getNextSyncToken() {
                         return nextSyncToken;
                 }
-        }
-
-        /**
-         * Convert Instant to Google DateTime
-         */
-        private DateTime convertToDateTime(Instant instant) {
-                return new DateTime(Date.from(instant));
-        }
-
-        /**
-         * Convert Google DateTime to Instant
-         */
-        private Instant convertToInstant(DateTime dateTime) {
-                return Instant.ofEpochMilli(dateTime.getValue());
-        }
-
-        /**
-         * Print event details (for debugging)
-         */
-        public void printEventDetails(Event event) {
-                System.out.println("=== Event Details ===");
-                System.out.println("ID: " + event.getId());
-                System.out.println("Title: " + event.getSummary());
-                System.out.println("Description: " + event.getDescription());
-                System.out.println("Location: " + event.getLocation());
-                System.out.println("Start: " + event.getStart().getDateTime());
-                System.out.println("End: " + event.getEnd().getDateTime());
-                System.out.println("Status: " + event.getStatus());
-                System.out.println("HTML Link: " + event.getHtmlLink());
-                System.out.println("====================");
         }
 }

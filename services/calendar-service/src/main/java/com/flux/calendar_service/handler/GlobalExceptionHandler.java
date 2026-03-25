@@ -276,6 +276,23 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * Handle ResponseStatusException – preserves the HTTP status code set in the exception.
+     */
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public ResponseEntity<ErrorResponse> handleResponseStatusException(
+            org.springframework.web.server.ResponseStatusException ex, WebRequest request) {
+        log.warn("ResponseStatusException: {} – {}", ex.getStatusCode(), ex.getReason());
+
+        Map<String, String> errors = new HashMap<>();
+        errors.put("error", ex.getReason() != null ? ex.getReason() : "Bad Request");
+        errors.put("path", request.getDescription(false).replace("uri=", ""));
+
+        return ResponseEntity
+                .status(ex.getStatusCode())
+                .body(new ErrorResponse(errors));
+    }
+
+    /**
      * Handle all other uncaught exceptions (500)
      */
     @ExceptionHandler(Exception.class)
@@ -293,3 +310,4 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(errors));
     }
 }
+

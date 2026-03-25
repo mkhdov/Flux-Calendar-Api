@@ -8,5 +8,6 @@ import java.util.List;
 @Repository
 public interface NoteRepository extends JpaRepository<Note, String> {
     List<Note> findAllByEventId(String eventId);
+    List<Note> findAllByEventIdIn(List<String> eventIds);
     List<Note> findAllByTaskId(String taskId);
 }

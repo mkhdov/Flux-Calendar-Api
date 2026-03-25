@@ -28,6 +28,9 @@ class UserConsumerTest {
     @Mock
     private CalendarRepository calendarRepository;
 
+    @Mock
+    private com.flux.calendar_service.connects.ConnectService connectService;
+
     @InjectMocks
     private UserConsumer userConsumer;
 

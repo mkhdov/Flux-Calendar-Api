@@ -4,6 +4,7 @@ import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.SetBucketPolicyArgs;
 import com.flux.calendar_service.exception.FileOperationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +33,28 @@ public class MinioService {
                 minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucketName).build());
                 log.info("Created MinIO bucket: {}", bucketName);
             }
+
+            // Define the public readonly policy
+            String policy = "{\n" +
+                    "  \"Version\": \"2012-10-17\",\n" +
+                    "  \"Statement\": [\n" +
+                    "    {\n" +
+                    "      \"Action\": [\"s3:GetObject\"],\n" +
+                    "      \"Effect\": \"Allow\",\n" +
+                    "      \"Principal\": {\"AWS\": [\"*\"]},\n" +
+                    "      \"Resource\": [\"arn:aws:s3:::" + bucketName + "/*\"],\n" +
+                    "      \"Sid\": \"PublicRead\"\n" +
+                    "    }\n" +
+                    "  ]\n" +
+                    "}";
+
+            minioClient.setBucketPolicy(
+                    SetBucketPolicyArgs.builder()
+                            .bucket(bucketName)
+                            .config(policy)
+                            .build()
+            );
+            log.info("Set public read policy for bucket: {}", bucketName);
         } catch (Exception e) {
             log.error("Error initializing MinIO bucket", e);
         }
@@ -54,8 +77,11 @@ public class MinioService {
         }
     }
 
+    @Value("${minio.external-url}")
+    private String externalUrl;
+
     public String getFileUrl(String fileName) {
-        return String.format("%s/%s/%s", "https://localhost:9000", bucketName, fileName);
+        return String.format("%s/%s/%s", externalUrl, bucketName, fileName);
     }
 
     public InputStream getFile(String fileName) {

@@ -82,13 +82,25 @@ public class EventController {
     @Operation(summary = "Get events by date range", description = "Retrieves events within a specific time range for a given calendar")
     @ApiResponse(responseCode = "200", description = "List of events in the range (may be empty)")
     @GetMapping("/range")
-    public ResponseEntity<List<EventResponse>> getEventsByDateRange(
+    public ResponseEntity<List<com.flux.calendar_service.event.dto.EventRangeResponse>> getEventsByDateRange(
             @Parameter(description = "Calendar ID") @RequestParam String calendarId,
             @Parameter(description = "Start time (ISO format; timezone-less values are treated as UTC)") @RequestParam Instant start,
             @Parameter(description = "End time (ISO format; timezone-less values are treated as UTC)") @RequestParam Instant end) {
         return ResponseEntity
                 .status(HttpStatus.OK)
                 .body(eventService.getEventsByDateRange(calendarId, start, end));
+    }
+
+    @Operation(summary = "Get events by month", description = "Retrieves a simplified version of events for a specific month")
+    @ApiResponse(responseCode = "200", description = "List of events for the month")
+    @GetMapping("/month")
+    public ResponseEntity<List<com.flux.calendar_service.event.dto.EventMonthResponse>> getEventsByMonth(
+            @Parameter(description = "Calendar ID") @RequestParam String calendarId,
+            @Parameter(description = "Year (e.g., 2023)") @RequestParam int year,
+            @Parameter(description = "Month (1-12)") @RequestParam int month) {
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(eventService.getEventsByMonth(calendarId, year, month));
     }
 
     /**

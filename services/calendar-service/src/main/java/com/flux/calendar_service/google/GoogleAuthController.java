@@ -1,6 +1,7 @@
 package com.flux.calendar_service.google;
 
 import java.time.ZoneId;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,7 +26,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.servlet.http.HttpSession;
 
 @RestController
 @RequestMapping("/auth")
@@ -37,6 +37,9 @@ public class GoogleAuthController {
 
     @Autowired
     private GoogleAuthService authService;
+
+    @Autowired
+    private GoogleTokenService googleTokenService;
 
     @Autowired
     private CalendarRepository calendarRepository;
@@ -51,17 +54,20 @@ public class GoogleAuthController {
      * Step 1: Initiate OAuth flow
      * GET http://localhost:8083/auth/google
      *
-     * This redirects user to Google's consent page
+     * Encodes userId + nonce into the OAuth state parameter (stateless — no session needed).
      */
     @Operation(summary = "Initiate Google OAuth flow", description = "Redirects the user to Google's consent page to authorize calendar access")
     @GetMapping("/google")
     public RedirectView authenticateWithGoogle(
-            @Parameter(description = "ID of the user initiating authentication") @RequestParam("userId") String userId,
-            HttpSession session) {
+            @Parameter(description = "ID of the user initiating authentication") @RequestParam("userId") String userId) {
         try {
             String callbackRedirectUri = authService.getConfiguredRedirectUri();
 
-            String state = UUID.randomUUID().toString();
+            // Encode userId + nonce into state — travels with the redirect, no session needed
+            String nonce = UUID.randomUUID().toString();
+            String state = Base64.getUrlEncoder().withoutPadding().encodeToString(
+                    (userId + ":" + nonce).getBytes()
+            );
 
             // Generate authorization URL
             String authUrl = UriComponentsBuilder
@@ -69,11 +75,6 @@ public class GoogleAuthController {
                     .queryParam("state", state)
                     .build(true)
                     .toUriString();
-
-            // Store state and userId in session
-            session.setAttribute("oauth_state", state);
-            session.setAttribute("oauth_user_id", userId);
-            session.setAttribute("oauth_redirect_uri", callbackRedirectUri);
 
             System.out.println("🔐 Redirecting to Google OAuth for user: " + userId);
             System.out.println("OAuth callback URI: " + callbackRedirectUri);
@@ -91,7 +92,7 @@ public class GoogleAuthController {
      * Step 2: OAuth callback endpoint
      * GET http://localhost:8080/auth/google/callback?code=xxxxx
      *
-     * Google redirects here after user grants permission
+     * Decodes userId directly from the state parameter — works across any pod.
      */
     @Operation(summary = "Google OAuth callback", description = "Endpoint where Google redirects after user authorization. Exchanges code for tokens.")
     @ApiResponse(responseCode = "200", description = "Authentication successful")
@@ -99,8 +100,7 @@ public class GoogleAuthController {
     public Map<String, Object> handleGoogleCallback(
             @Parameter(description = "Authorization code from Google") @RequestParam(value = "code", required = false) String authorizationCode,
             @Parameter(description = "OAuth error returned by Google") @RequestParam(value = "error", required = false) String error,
-            @Parameter(description = "State parameter for security") @RequestParam(value = "state", required = false) String state,
-            HttpSession session) {
+            @Parameter(description = "State parameter for security") @RequestParam(value = "state", required = false) String state) {
 
         try {
             System.out.println("📥 Received callback from Google");
@@ -115,28 +115,37 @@ public class GoogleAuthController {
                 throw new UnauthorizedException("Missing authorization code from Google callback");
             }
 
-            String expectedState = (String) session.getAttribute("oauth_state");
-            if (expectedState != null && (state == null || !expectedState.equals(state))) {
-                throw new UnauthorizedException("Invalid OAuth state");
+            // Decode state → "userId:nonce"
+            if (state == null || state.isBlank()) {
+                throw new UnauthorizedException("Missing OAuth state parameter");
             }
+
+            String decoded;
+            try {
+                decoded = new String(Base64.getUrlDecoder().decode(state));
+            } catch (IllegalArgumentException e) {
+                throw new UnauthorizedException("Invalid OAuth state encoding");
+            }
+
+            String[] parts = decoded.split(":", 2);
+            if (parts.length != 2) {
+                throw new UnauthorizedException("Invalid OAuth state format");
+            }
+
+            // userId is now extracted directly from state — no session required
+            String userId = parts[0];
+            // parts[1] is the nonce — can be used for additional CSRF validation if needed
+
+            if (userId == null || userId.isBlank()) {
+                throw new UnauthorizedException("User ID not found in OAuth state");
+            }
+
+            String callbackRedirectUri = authService.getConfiguredRedirectUri();
 
             System.out.println("Authorization code: " + authorizationCode.substring(0, 20) + "...");
 
-            // Retrieve userId from session
-            String userId = (String) session.getAttribute("oauth_user_id");
-            if (userId == null) {
-                throw new UnauthorizedException("User ID not found in session");
-            }
-
-            String callbackRedirectUri = (String) session.getAttribute("oauth_redirect_uri");
-
             // Exchange authorization code for access token
             Credential credential = authService.exchangeCodeForToken(authorizationCode, userId, callbackRedirectUri);
-
-            // Store credential in session
-            session.setAttribute("google_credential", credential);
-            session.setAttribute("user_authenticated", true);
-            session.setAttribute("user_id", userId);
 
             if (googleCalendarApiService == null) {
                 throw new UnauthorizedException("Google Calendar integration is not available");
@@ -144,26 +153,17 @@ public class GoogleAuthController {
             String googleCalendarId = googleCalendarApiService.getPrimaryCalendarId(userId);
             Calendar googleSyncCalendar = ensureGoogleSyncCalendar(userId, googleCalendarId);
 
-            // ── Mark user as Google-connected in DB ─────────────────────────────────
-            // This clears any previous invalid_grant disconnect state so the scheduler
-            // resumes syncing for this user on its next tick.
+            // Mark user as Google-connected in DB
             authService.markUserAsConnected(userId, googleCalendarId);
 
             System.out.println("✅ Authentication successful for user: " + userId);
             System.out.println("Access Token: " + credential.getAccessToken().substring(0, 20) + "...");
-            System.out.println(
-                    "Refresh Token: " + (credential.getRefreshToken() != null ? "Available" : "Not available"));
+            System.out.println("Refresh Token: " + (credential.getRefreshToken() != null ? "Available" : "Not available"));
             System.out.println("Google Sync Calendar: " + googleSyncCalendar.getId() + " (" + googleCalendarId + ")");
 
             return Map.of(
                     "status", "success",
-                    "message", "Successfully authenticated with Google",
-                    "userId", userId,
-                    "googleCalendarId", googleCalendarId,
-                    "googleSyncCalendarId", googleSyncCalendar.getId(),
-                    "redirectUri", callbackRedirectUri,
-                    "hasRefreshToken", credential.getRefreshToken() != null,
-                    "expiresIn", credential.getExpiresInSeconds());
+                    "message", "Successfully authenticated with Google");
 
         } catch (Exception e) {
             System.err.println("❌ Error in callback: " + e.getMessage());
@@ -175,62 +175,26 @@ public class GoogleAuthController {
     }
 
     /**
-     * Check authentication status (session-based).
+     * Check authentication status (DB-based).
      * GET /auth/status
      */
-    @Operation(summary = "Check session authentication status")
+    @Operation(summary = "Check DB authentication status")
     @GetMapping("/status")
-    public Map<String, Object> checkAuthStatus(HttpSession session) {
-        Boolean isAuthenticated = (Boolean) session.getAttribute("user_authenticated");
-        Credential credential = (Credential) session.getAttribute("google_credential");
-
-        if (isAuthenticated != null && isAuthenticated && credential != null) {
-            return Map.of(
-                    "authenticated", true,
-                    "hasAccessToken", credential.getAccessToken() != null,
-                    "hasRefreshToken", credential.getRefreshToken() != null,
-                    "expiresIn", credential.getExpiresInSeconds() != null ? credential.getExpiresInSeconds() : 0);
-        }
-
-        return Map.of("authenticated", false);
+    public Map<String, Object> checkAuthStatus(@RequestParam("userId") String userId) {
+        return googleTokenService.findToken(userId)
+                .<Map<String, Object>>map(token -> Map.of(
+                        "authenticated", authService.isGoogleConnected(userId),
+                        "hasAccessToken", token.getAccessToken() != null,
+                        "hasRefreshToken", token.getRefreshToken() != null,
+                        "expiresIn", token.getExpiresAt() != null
+                                ? Math.max(0, token.getExpiresAt().getEpochSecond()
+                                - java.time.Instant.now().getEpochSecond())
+                                : 0))
+                .orElse(Map.of("authenticated", false));
     }
 
     /**
-     * DB-backed Google connection status — frontend should call THIS, not
-     * /auth/status.
-     *
-     * <p>
-     * Unlike /auth/status (which reads from the HTTP session and resets on pod
-     * restart),
-     * this endpoint reads the {@code google_connected} column from the database, so
-     * it
-     * accurately reflects whether the user's refresh token is valid.
-     *
-     * <p>
-     * Frontend contract:
-     * <ul>
-     * <li>Call on app load (after login) to decide whether to show a reconnect
-     * banner</li>
-     * <li>Call after a successful /auth/google/callback redirect to confirm
-     * connection</li>
-     * <li>If {@code googleConnected == false}, show: "Reconnect Google Calendar"
-     * button</li>
-     * <li>If {@code disconnectedAt} is present, show: "Disconnected on [date]"</li>
-     * </ul>
-     *
-     * <p>
-     * Response example (connected):
-     * 
-     * <pre>
-     * { "googleConnected": true,  "googleEmail": "user@gmail.com", "disconnectedAt": null }
-     * </pre>
-     * 
-     * Response example (revoked token):
-     * 
-     * <pre>
-     * { "googleConnected": false, "googleEmail": null, "disconnectedAt": "2026-03-01T00:00:00Z" }
-     * </pre>
-     *
+     * DB-backed Google connection status — frontend should call THIS, not /auth/status.
      * GET /auth/google/connection-status?userId={userId}
      */
     @Operation(summary = "Get DB-backed Google connection status for a user")
@@ -257,17 +221,16 @@ public class GoogleAuthController {
      */
     @Operation(summary = "Logout", description = "Invalidates the session and optionally revokes Google tokens")
     @PostMapping("/logout")
-    public Map<String, String> logout(HttpSession session) {
+    public Map<String, String> logout(@RequestParam("userId") String userId) {
         try {
-            Credential credential = (Credential) session.getAttribute("google_credential");
-
-            if (credential != null) {
-                // Optionally revoke the token
-                authService.revokeToken(credential);
-            }
-
-            // Clear session
-            session.invalidate();
+            googleTokenService.findToken(userId).ifPresent(token -> {
+                try {
+                    authService.revokeToken(googleTokenService.buildCredential(token));
+                } catch (Exception e) {
+                    System.err.println("❌ Error during token revoke: " + e.getMessage());
+                }
+            });
+            googleTokenService.deleteToken(userId);
 
             System.out.println("✅ User logged out successfully");
             return Map.of("status", "success", "message", "Logged out successfully");
@@ -284,28 +247,17 @@ public class GoogleAuthController {
      */
     @Operation(summary = "Refresh token", description = "Refreshes the Google access token using the refresh token")
     @PostMapping("/refresh")
-    public Map<String, Object> refreshToken(HttpSession session) {
+    public Map<String, Object> refreshToken(@RequestParam("userId") String userId) {
         try {
-            Credential credential = (Credential) session.getAttribute("google_credential");
-
+            Credential credential = authService.refreshAccessToken(userId);
             if (credential == null) {
                 return Map.of("status", "error", "message", "Not authenticated");
             }
 
-            // Refresh the token
-            boolean refreshed = authService.refreshAccessToken(credential);
-
-            if (refreshed) {
-                // Update session with new credential
-                session.setAttribute("google_credential", credential);
-
-                return Map.of(
-                        "status", "success",
-                        "message", "Token refreshed successfully",
-                        "expiresIn", credential.getExpiresInSeconds());
-            } else {
-                return Map.of("status", "error", "message", "Failed to refresh token");
-            }
+            return Map.of(
+                    "status", "success",
+                    "message", "Token refreshed successfully",
+                    "expiresIn", credential.getExpiresInSeconds());
 
         } catch (Exception e) {
             System.err.println("❌ Error refreshing token: " + e.getMessage());

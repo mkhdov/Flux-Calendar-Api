@@ -8,6 +8,7 @@ import java.util.List;
 @Repository
 public interface SubtaskRepository extends JpaRepository<Subtask, String> {
     List<Subtask> findAllByEventId(String eventId);
+    List<Subtask> findAllByEventIdIn(List<String> eventIds);
 
     List<Subtask> findAllByTaskId(String taskId);
 }

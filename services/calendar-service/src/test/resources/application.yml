@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: calendar-service-test
+  cloud:
+    config:
+      enabled: false

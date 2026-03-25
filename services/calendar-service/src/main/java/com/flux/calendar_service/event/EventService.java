@@ -2,11 +2,18 @@ package com.flux.calendar_service.event;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.flux.calendar_service.attachment.Attachment;
+import com.flux.calendar_service.attachment.AttachmentRepository;
 import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.calendar.CalendarRepository;
 import com.flux.calendar_service.conference.Conference;
@@ -14,6 +21,7 @@ import com.flux.calendar_service.conference.ConferenceMapper;
 import com.flux.calendar_service.conference.ConferenceRepository;
 import com.flux.calendar_service.event.dto.EventRequest;
 import com.flux.calendar_service.event.dto.EventResponse;
+import com.flux.calendar_service.event.dto.EventMonthResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
 import com.flux.calendar_service.exception.ConflictException;
 import com.flux.calendar_service.exception.EmptyFieldException;
@@ -31,11 +39,20 @@ import com.flux.calendar_service.location.LocationRepository;
 import com.flux.calendar_service.location.LocationService;
 import com.flux.calendar_service.member.Member;
 import com.flux.calendar_service.member.MemberRepository;
+import com.flux.calendar_service.note.Note;
+import com.flux.calendar_service.note.NoteRepository;
+import com.flux.calendar_service.subtask.Subtask;
+import com.flux.calendar_service.subtask.SubtaskRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
+import org.springframework.http.HttpStatus;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,8 +61,13 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class EventService {
+    static final String EVENTS_BY_RANGE_CACHE = "events:by-range";
+    static final String EVENTS_BY_MONTH_CACHE = "events:month";
+    static final String EVENTS_DETAIL_CACHE = "events:detail";
+
     private final EventRepository eventRepository;
     private final EventMapper eventMapper;
+    private final AttachmentRepository attachmentRepository;
     private final CalendarRepository calendarRepository;
     private final LocationRepository locationRepository;
     private final LocationMapper locationMapper;
@@ -53,6 +75,9 @@ public class EventService {
     private final ConferenceMapper conferenceMapper;
     private final MemberRepository memberRepository;
     private final LocationService locationService;
+    private final NoteRepository noteRepository;
+    private final SubtaskRepository subtaskRepository;
+    private final EventRangeValidator rangeValidator;
 
     @Autowired(required = false)
     private GoogleCalendarApiService googleCalendarApiService;
@@ -63,28 +88,29 @@ public class EventService {
     @Autowired(required = false)
     private com.flux.calendar_service.zoom.ZoomMeetingService zoomMeetingService;
 
-    private String currentUserId() {
-        return SecurityContextHolder.getContext().getAuthentication().getName();
-    }
+    @Autowired
+    private KafkaTemplate<String, Object> kafkaTemplate;
+
+//    private String currentUserId() {
+//        return SecurityContextHolder.getContext().getAuthentication().getName();
+//    }
 
     @Transactional
+    @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true)
     public String createEvent(String calendarId, EventRequest request) {
         if (calendarId == null || calendarId.isBlank()) {
             throw new EmptyFieldException("Calendar ID cannot be empty");
         }
 
-        // Validate calendar exists
         Calendar calendar = calendarRepository.findById(calendarId)
                 .orElseThrow(() -> new ResourceNotFoundException("Calendar not found with ID: " + calendarId));
 
-        // Validate time if not all-day event
         if (!request.allDay() && request.startTime() != null && request.endTime() != null) {
             if (request.endTime().isBefore(request.startTime())) {
                 throw new InvalidTimeRangeException("End time cannot be before start time");
             }
         }
 
-        // Create event
         Event event = eventMapper.toEvent(request, calendar);
         normalizeAllDayEventTimes(event, request);
 
@@ -95,25 +121,20 @@ public class EventService {
             event.getAttachments().forEach(attachment -> attachment.setEvent(event));
         }
 
-        // Save event first so it gets a generated UUID before we reference
-        // event.getId()
         Event savedEvent = eventRepository.save(event);
 
-        // Attach location after save (locationService.create needs a valid event ID)
         if (request.location() != null) {
             Location location = locationService.create(savedEvent.getId(), request.location());
             savedEvent.setLocation(location);
             savedEvent = eventRepository.save(savedEvent);
         }
 
-        // Sync with Google Calendar if enabled
         if (shouldSyncToGoogle(calendar)) {
             try {
                 com.google.api.services.calendar.model.Event googleEvent;
                 String userId = calendar.getUserId();
 
                 if (savedEvent.isAllDay()) {
-                    // Create all-day event
                     googleEvent = googleCalendarApiService.createAllDayEvent(
                             userId,
                             savedEvent.getTitle(),
@@ -121,7 +142,6 @@ public class EventService {
                             savedEvent.getLocation(),
                             savedEvent.getStartTime());
                 } else {
-                    // Create simple event
                     googleEvent = googleCalendarApiService.createEvent(
                             userId,
                             savedEvent.getTitle(),
@@ -132,16 +152,27 @@ public class EventService {
                             savedEvent.getType().toString());
                 }
 
-                // Update event with Google Calendar ID
                 savedEvent.setGoogleCalendarId(googleEvent.getId());
                 savedEvent.setSyncStatus(SyncStatus.SYNCED);
                 eventRepository.save(savedEvent);
+
+
+//              In createEvent(), after eventRepository.save():
+                kafkaTemplate.send("reminder-events", savedEvent.getId(), Map.of(
+                        "eventId", savedEvent.getId(),
+                        "userId", calendar.getUserId(),
+                        "eventTitle", savedEvent.getTitle(),
+                        "action", "CREATE",
+                        "reminders", List.of(
+                                Map.of("triggerTime", savedEvent.getStartTime().minus(15, ChronoUnit.MINUTES).toString(),
+                                        "type", "EMAIL")
+                        )
+                ));
 
                 log.info("Event created and synced to Google Calendar. Event ID: {}, Google Calendar ID: {}",
                         savedEvent.getId(), googleEvent.getId());
             } catch (IOException e) {
                 if (GoogleAuthService.isInvalidGrant(e)) {
-                    // User's token is permanently revoked — mark disconnected and tag event
                     log.error("Google token revoked while creating event for user {}. "
                             + "Event saved locally. Event ID: {}", calendar.getUserId(), savedEvent.getId());
                     if (googleAuthService != null) {
@@ -157,8 +188,7 @@ public class EventService {
         } else {
             if (googleAuthService != null && !googleAuthService.isGoogleConnected(calendar.getUserId())
                     && calendar.getGoogleCalendarId() != null && !calendar.getGoogleCalendarId().isBlank()) {
-                log.warn(
-                        "Event {} not synced due to AUTH_ERROR. Google auth is disconnected for user {}. Calendar ID: {}",
+                log.warn("Event {} not synced due to AUTH_ERROR. Google auth is disconnected for user {}. Calendar ID: {}",
                         savedEvent.getId(), calendar.getUserId(), calendar.getId());
                 savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
                 eventRepository.save(savedEvent);
@@ -166,30 +196,36 @@ public class EventService {
                 log.debug("Event created locally without Google sync. Calendar ID: {}", calendar.getId());
             }
         }
-        Member member = Member.builder()
-                .fullName("Owner")
-                .email("Owner")
-                .isOwner(true)
-                .event(savedEvent)
-                .build();
 
-        memberRepository.save(member);
+        // FIX #3: Only add hardcoded Owner member when NOT syncing to Google.
+        // If Google-synced, syncAttendeesFromGoogle will populate real members
+        // from the Google event (organizer + attendees). Adding a dummy "Owner"
+        // here would create a stale row that gets deleted and re-created on every
+        // sync tick, which was the root cause of StaleObjectStateException.
+        if (!shouldSyncToGoogle(calendar)) {
+            Member member = Member.builder()
+                    .fullName("Owner")
+                    .email("Owner")
+                    .isOwner(true)
+                    .event(savedEvent)
+                    .build();
+            memberRepository.save(member);
+        }
 
         return savedEvent.getId();
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true)
     public String createEventWithGoogleMeet(String calendarId, EventRequest request) {
 
         if (calendarId == null || calendarId.isBlank()) {
             throw new EmptyFieldException("Calendar ID cannot be empty");
         }
 
-        // 1️⃣ Validate calendar
         Calendar calendar = calendarRepository.findById(calendarId)
                 .orElseThrow(() -> new ResourceNotFoundException("Calendar not found with ID: " + calendarId));
 
-        // 2️⃣ Validate time
         if (!request.allDay()
                 && request.startTime() != null
                 && request.endTime() != null
@@ -197,7 +233,6 @@ public class EventService {
             throw new InvalidTimeRangeException("End time cannot be before start time");
         }
 
-        // 3️⃣ Create & save local event
         Event event = eventMapper.toEvent(request, calendar);
         normalizeAllDayEventTimes(event, request);
         if (event.getSubtasks() != null) {
@@ -208,9 +243,6 @@ public class EventService {
         }
         Event savedEvent = eventRepository.save(event);
 
-        // 4️⃣ Google sync (optional)
-        // Google Meet events should sync even when created from a non-dedicated
-        // calendar.
         if (googleCalendarApiService == null) {
             log.debug("Event created locally without Google sync. Calendar ID: {}", calendar.getId());
             return savedEvent.getId();
@@ -233,7 +265,6 @@ public class EventService {
                             savedEvent.getDescription(),
                             savedEvent.getStartTime());
                 } else {
-                    // ✔ Timed → WITH Meet
                     googleEvent = googleCalendarApiService.createEventWithGoogleMeet(
                             userId,
                             savedEvent.getTitle(),
@@ -244,7 +275,6 @@ public class EventService {
                             savedEvent.getType().toString());
                 }
 
-                // 5️⃣ Extract Meet details if present
                 String googleConferenceId = null;
                 String meetLink = null;
                 String meetingCode = null;
@@ -270,7 +300,6 @@ public class EventService {
                     }
                 }
 
-                // 6️⃣ Update and save local event (cascade will save conference)
                 savedEvent.setGoogleCalendarId(googleEvent.getId());
                 savedEvent.setSyncStatus(SyncStatus.SYNCED);
                 if (googleConferenceId != null || meetLink != null || meetingCode != null || phoneNumber != null
@@ -294,11 +323,8 @@ public class EventService {
 
                 eventRepository.save(savedEvent);
 
-                log.info(
-                        "Event synced. Local ID: {}, Google ID: {}, Meet: {}",
-                        savedEvent.getId(),
-                        googleEvent.getId(),
-                        meetLink);
+                log.info("Event synced. Local ID: {}, Google ID: {}, Meet: {}",
+                        savedEvent.getId(), googleEvent.getId(), meetLink);
 
             } catch (IOException e) {
                 if (GoogleAuthService.isInvalidGrant(e)) {
@@ -317,19 +343,25 @@ public class EventService {
             }
         }
 
-        Member member = Member.builder()
-                .fullName("Owner")
-                .email("Owner")
-                .isOwner(true)
-                .event(savedEvent)
-                .build();
-
-        memberRepository.save(member);
+        // FIX #3: Same as createEvent — skip dummy Owner for Google-synced events.
+        if (!shouldSyncToGoogle(calendar)) {
+            Member member = Member.builder()
+                    .fullName("Owner")
+                    .email("Owner")
+                    .isOwner(true)
+                    .event(savedEvent)
+                    .build();
+            memberRepository.save(member);
+        }
 
         return savedEvent.getId();
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true),
+        @CacheEvict(cacheNames = EVENTS_DETAIL_CACHE, key = "#id")
+    })
     public void addGoogleMeetToExistingEvent(String id) {
         if (id == null || id.isBlank()) {
             throw new EmptyFieldException("Event ID cannot be empty");
@@ -345,11 +377,8 @@ public class EventService {
         try {
             String userId = event.getCalendar().getUserId();
             com.google.api.services.calendar.model.Event googleEvent = googleCalendarApiService
-                    .addGoogleMeetToExistingEvent(
-                            userId,
-                            getGoogleEventId(event));
+                    .addGoogleMeetToExistingEvent(userId, getGoogleEventId(event));
 
-            // Extract Meet details
             String googleConferenceId = null;
             String meetLink = null;
             String meetingCode = null;
@@ -399,18 +428,13 @@ public class EventService {
             log.error("Failed to add Google Meet to event. Event ID: {}", event.getId(), e);
             throw new ServiceUnavailableException("Failed to add Google Meet", e);
         }
-
-        Member member = Member.builder()
-                .fullName("Owner")
-                .email("Owner")
-                .isOwner(true)
-                .event(event)
-                .build();
-
-        memberRepository.save(member);
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true),
+        @CacheEvict(cacheNames = EVENTS_DETAIL_CACHE, key = "#id")
+    })
     public void removeGoogleMeetFromEvent(String id) {
         if (id == null || id.isBlank()) {
             throw new EmptyFieldException("Event ID cannot be empty");
@@ -425,19 +449,12 @@ public class EventService {
 
         if (shouldSyncExistingGoogleEvent(event)) {
             try {
-                // We don't have a direct 'removeMeet' in ApiService, but we can update the
-                // event with null conferenceData
-                // For now, let's assume we want to clear it locally and potentially update
-                // Google
                 String userId = event.getCalendar().getUserId();
                 com.google.api.services.calendar.model.Event googleEvent = googleCalendarApiService.getEventById(userId,
                         getGoogleEventId(event));
                 googleEvent.setConferenceData(null);
 
-                // Update Google
-                googleCalendarApiService.removeConfrenceFromEvent(
-                        userId,
-                        getGoogleEventId(event));
+                googleCalendarApiService.removeConfrenceFromEvent(userId, getGoogleEventId(event));
             } catch (IOException e) {
                 log.error("Failed to remove Google Meet from Google Calendar. Event ID: {}", event.getId(), e);
             }
@@ -463,16 +480,15 @@ public class EventService {
     // ========================================
 
     @Transactional
+    @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true)
     public String createEventWithZoom(String calendarId, EventRequest request, String userId) {
         if (calendarId == null || calendarId.isBlank()) {
             throw new EmptyFieldException("Calendar ID cannot be empty");
         }
 
-        // 1️⃣ Validate calendar
         Calendar calendar = calendarRepository.findById(calendarId)
                 .orElseThrow(() -> new ResourceNotFoundException("Calendar not found with ID: " + calendarId));
 
-        // 2️⃣ Validate time
         if (!request.allDay()
                 && request.startTime() != null
                 && request.endTime() != null
@@ -480,7 +496,6 @@ public class EventService {
             throw new InvalidTimeRangeException("End time cannot be before start time");
         }
 
-        // 3️⃣ Create & save local event
         Event event = eventMapper.toEvent(request, calendar);
         if (event.getSubtasks() != null) {
             event.getSubtasks().forEach(subtask -> subtask.setEvent(event));
@@ -489,18 +504,14 @@ public class EventService {
             event.getAttachments().forEach(attachment -> attachment.setEvent(event));
         }
 
-        // Save event first so it gets a generated UUID before we reference
-        // event.getId()
         Event savedEvent = eventRepository.save(event);
 
-        // Attach location after save (locationService.create needs a valid event ID)
         if (request.location() != null) {
             Location location = locationService.create(savedEvent.getId(), request.location());
             savedEvent.setLocation(location);
             savedEvent = eventRepository.save(savedEvent);
         }
 
-        // 4️⃣ Create Zoom meeting (Best effort)
         Conference zoomConference = null;
         if (zoomMeetingService != null && !savedEvent.isAllDay()) {
             try {
@@ -512,11 +523,9 @@ public class EventService {
                         zoomConference.getZoomMeetingId());
             } catch (ZoomException e) {
                 log.error("Failed to create Zoom meeting for event {}: {}", savedEvent.getId(), e.getMessage());
-                // Continue without Zoom
             }
         }
 
-        // 5️⃣ Sync with Google Calendar (if enabled)
         if (shouldSyncToGoogle(calendar)) {
             try {
                 StringBuilder description = new StringBuilder();
@@ -559,8 +568,7 @@ public class EventService {
         } else {
             if (googleAuthService != null && !googleAuthService.isGoogleConnected(calendar.getUserId())
                     && calendar.getGoogleCalendarId() != null && !calendar.getGoogleCalendarId().isBlank()) {
-                log.warn(
-                        "Event {} not synced due to AUTH_ERROR. Google auth is disconnected for user {}. Calendar ID: {}",
+                log.warn("Event {} not synced due to AUTH_ERROR. Google auth is disconnected for user {}. Calendar ID: {}",
                         savedEvent.getId(), calendar.getUserId(), calendar.getId());
                 savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
                 eventRepository.save(savedEvent);
@@ -569,19 +577,25 @@ public class EventService {
             }
         }
 
-        // 6️⃣ Create owner member
-        Member member = Member.builder()
-                .fullName("Owner")
-                .email("Owner")
-                .isOwner(true)
-                .event(savedEvent)
-                .build();
-        memberRepository.save(member);
+        // FIX #3: Skip dummy Owner for Google-synced events.
+        if (!shouldSyncToGoogle(calendar)) {
+            Member member = Member.builder()
+                    .fullName("Owner")
+                    .email("Owner")
+                    .isOwner(true)
+                    .event(savedEvent)
+                    .build();
+            memberRepository.save(member);
+        }
 
         return savedEvent.getId();
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true),
+        @CacheEvict(cacheNames = EVENTS_DETAIL_CACHE, key = "#id")
+    })
     public void addZoomToExistingEvent(String id, String userId) {
         if (id == null || id.isBlank()) {
             throw new EmptyFieldException("Event ID cannot be empty");
@@ -609,7 +623,6 @@ public class EventService {
             log.info("Zoom meeting added to event. Event ID: {}, Zoom Meeting ID: {}",
                     event.getId(), conference.getZoomMeetingId());
 
-            // Sync with Google Calendar if enabled
             if (shouldSyncExistingGoogleEvent(event)) {
                 StringBuilder description = new StringBuilder();
                 description.append(event.getDescription()).append("\n\nZoom Meeting: ")
@@ -629,21 +642,18 @@ public class EventService {
         }
     }
 
-    /**
-     * Removes only the Zoom meeting link portion appended during creation.
-     * Leaves the rest of the user's original description intact.
-     *
-     * Pattern matched: "\n\nZoom Meeting: <link>"
-     */
     private String removeZoomLinkFromDescription(String description) {
         if (description == null || description.isBlank()) {
             return description;
         }
-        // Removes the exact block appended in createEventWithZoom()
         return description.replaceAll("\\n\\nZoom Meeting: https?://\\S+", "").stripTrailing();
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true),
+        @CacheEvict(cacheNames = EVENTS_DETAIL_CACHE, key = "#id")
+    })
     public void removeZoomFromEvent(String id, String userId) {
         if (id == null || id.isBlank()) {
             throw new EmptyFieldException("Event ID cannot be empty");
@@ -660,7 +670,6 @@ public class EventService {
             throw new InvalidOperationException("Event does not have a Zoom meeting");
         }
 
-        // 1️⃣ Delete from Zoom servers
         if (zoomMeetingService != null) {
             try {
                 zoomMeetingService.deleteZoomMeeting(event.getId(), userId);
@@ -671,22 +680,19 @@ public class EventService {
             }
         }
 
-        // 2️⃣ Clean Zoom link from description, preserve user's original text
         String cleanedDescription = removeZoomLinkFromDescription(event.getDescription());
 
-        // 3️⃣ Update local event — clear conference and fix description
         event.setConference(null);
         event.setDescription(cleanedDescription);
         eventRepository.save(event);
 
-        // 4️⃣ Sync cleaned description to Google Calendar
         if (shouldSyncExistingGoogleEvent(event)) {
             try {
                 googleCalendarApiService.updateEvent(
                         event.getCalendar().getUserId(),
                         event.getGoogleCalendarId(),
                         event.getTitle(),
-                        cleanedDescription); // ✅ cleaned, not raw event.getDescription()
+                        cleanedDescription);
                 log.info("Google Calendar updated after Zoom removal. Event ID: {}", id);
             } catch (IOException e) {
                 if (GoogleAuthService.isInvalidGrant(e)) {
@@ -705,6 +711,7 @@ public class EventService {
         log.info("Zoom meeting fully removed from event. Event ID: {}", id);
     }
 
+    @Cacheable(cacheNames = EVENTS_DETAIL_CACHE, key = "#id")
     public EventResponse getEventById(String id) {
         if (id == null || id.isBlank()) {
             throw new EmptyFieldException("Event ID cannot be empty");
@@ -729,7 +736,6 @@ public class EventService {
             throw new EmptyFieldException("Calendar ID cannot be empty");
         }
 
-        // Validate calendar exists
         calendarRepository.findById(calendarId)
                 .orElseThrow(() -> new ResourceNotFoundException("Calendar not found with ID: " + calendarId));
 
@@ -756,20 +762,53 @@ public class EventService {
         return userEvents;
     }
 
-    public List<EventResponse> getEventsByDateRange(String calendarId, Instant start, Instant end) {
+    @Cacheable(cacheNames = EVENTS_BY_RANGE_CACHE, key = "#calendarId + ':' + #start.toEpochMilli() + ':' + #end.toEpochMilli()")
+    public List<com.flux.calendar_service.event.dto.EventRangeResponse> getEventsByDateRange(String calendarId, Instant start, Instant end) {
         if (start == null || end == null) {
             throw new EmptyFieldException("Start and end dates cannot be null");
         }
         if (end.isBefore(start)) {
             throw new InvalidTimeRangeException("End date cannot be before start date");
         }
-        return eventRepository.findEventsWithRelations(calendarId, start, end)
+        rangeValidator.validate(ViewType.WEEK, start, end);
+
+        return eventRepository.findEventsByRangeFiltered(calendarId, start, end)
                 .stream()
-                .map(eventMapper::toEventResponse)
+                .map(eventMapper::toEventRangeResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Cacheable(cacheNames = EVENTS_BY_MONTH_CACHE, key = "#calendarId + ':' + #year + ':' + #month")
+    public List<EventMonthResponse> getEventsByMonth(String calendarId, int year, int month) {
+        if (month < 1 || month > 12) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Month must be between 1 and 12"
+            );
+        }
+        if (year < 1 || year > 9999) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Year must be between 1 and 9999"
+            );
+        }
+        java.time.YearMonth yearMonth = java.time.YearMonth.of(year, month);
+        Instant start = yearMonth.atDay(1).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
+        Instant end = yearMonth.atEndOfMonth().atTime(23, 59, 59, 999999999).toInstant(java.time.ZoneOffset.UTC);
+
+        rangeValidator.validate(ViewType.MONTH, start, end);
+
+        List<Event> events = loadRangeEvents(calendarId, start, end);
+        return events.stream()
+                .map(eventMapper::toEventMonthResponse)
                 .collect(Collectors.toList());
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true),
+        @CacheEvict(cacheNames = EVENTS_DETAIL_CACHE, key = "#id")
+    })
     public void updateEvent(String id, EventUpdateRequest request) {
         if (id == null || id.isBlank()) {
             throw new EmptyFieldException("Event ID cannot be empty");
@@ -778,7 +817,6 @@ public class EventService {
         Event event = eventRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
 
-        // Validate time if being updated
         Instant newStartTime = request.startTime() != null ? request.startTime() : event.getStartTime();
         Instant newEndTime = request.endTime() != null ? request.endTime() : event.getEndTime();
         boolean isAllDay = request.allDay() != null ? request.allDay() : event.isAllDay();
@@ -789,35 +827,28 @@ public class EventService {
             }
         }
 
-        // Update basic event fields
         eventMapper.updateEventFromRequest(event, request);
 
-        // Handle location update
         if (request.location() != null) {
             Location location;
             if (event.getLocation() != null) {
-                // Update existing location
                 location = event.getLocation();
                 locationMapper.updateLocationFromRequest(location, request.location());
                 locationRepository.save(location);
             } else {
-                // Create new location
                 location = locationMapper.toLocation(request.location());
                 location = locationRepository.save(location);
                 event.setLocation(location);
             }
         }
 
-        // Handle conference update
         if (request.conference() != null) {
             Conference conference;
             if (event.getConference() != null) {
-                // Update existing conference
                 conference = event.getConference();
                 conferenceMapper.updateConferenceFromRequest(conference, request.conference());
                 conferenceRepository.save(conference);
             } else {
-                // Create new conference
                 conference = conferenceMapper.toConference(request.conference(), event);
                 conferenceRepository.save(conference);
             }
@@ -825,7 +856,6 @@ public class EventService {
 
         eventRepository.save(event);
 
-        // Sync with Google Calendar if event is already synced and service is available
         if (shouldSyncExistingGoogleEvent(event)) {
             try {
                 String locationName = event.getLocation() != null ? event.getLocation().getPlaceName() : null;
@@ -838,9 +868,9 @@ public class EventService {
                         event.getDescription(),
                         event.getStartTime(),
                         event.getEndTime(),
+                        event.isAllDay(),
                         locationName,
-                        List.of() // No attendees support in current DTO
-                );
+                        java.util.Collections.emptyList());
 
                 event.setSyncStatus(SyncStatus.SYNCED);
                 eventRepository.save(event);
@@ -856,6 +886,10 @@ public class EventService {
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true),
+        @CacheEvict(cacheNames = EVENTS_DETAIL_CACHE, key = "#id")
+    })
     public void deleteEvent(String id) {
         if (id == null || id.isBlank()) {
             throw new EmptyFieldException("Event ID cannot be empty");
@@ -864,7 +898,6 @@ public class EventService {
         Event event = eventRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
 
-        // Delete from Google Calendar if synced and service is available
         if (shouldSyncExistingGoogleEvent(event)) {
             try {
                 String userId = event.getCalendar().getUserId();
@@ -873,20 +906,28 @@ public class EventService {
                         event.getId(), event.getGoogleCalendarId());
             } catch (IOException e) {
                 log.error("Failed to delete event from Google Calendar. Event ID: {}", event.getId(), e);
-                // Continue with local deletion even if Google Calendar deletion fails
             }
         }
 
         eventRepository.delete(event);
+        // In deleteEvent():
+        kafkaTemplate.send("reminder-events", id, Map.of(
+                "eventId", id,
+                "action", "DELETE"
+        ));
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true)
     public String createEventWithLocation(String calendarId, EventRequest request) {
-        String eventId = createEvent(calendarId, request);
-        return eventId;
+        return createEvent(calendarId, request);
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true),
+        @CacheEvict(cacheNames = EVENTS_DETAIL_CACHE, key = "#eventId")
+    })
     public void attachLocation(String eventId, String locationId) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
@@ -899,6 +940,10 @@ public class EventService {
     }
 
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(cacheNames = {EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE}, allEntries = true),
+        @CacheEvict(cacheNames = EVENTS_DETAIL_CACHE, key = "#eventId")
+    })
     public void attachConference(String eventId, String conferenceId) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
@@ -912,6 +957,35 @@ public class EventService {
 
         conference.setEvent(event);
         conferenceRepository.save(conference);
+    }
+
+    private List<Event> loadRangeEvents(String calendarId, Instant start, Instant end) {
+        List<Event> events = eventRepository.findRangeEventsWithCoreRelations(calendarId, start, end);
+        if (events.isEmpty()) {
+            return events;
+        }
+
+        List<String> eventIds = events.stream()
+                .map(Event::getId)
+                .toList();
+
+        Map<String, List<Subtask>> subtasksByEvent = subtaskRepository.findAllByEventIdIn(eventIds).stream()
+                .collect(Collectors.groupingBy(subtask -> subtask.getEvent().getId(), LinkedHashMap::new, Collectors.toList()));
+        Map<String, List<Attachment>> attachmentsByEvent = attachmentRepository.findByEventIdIn(eventIds).stream()
+                .collect(Collectors.groupingBy(attachment -> attachment.getEvent().getId(), LinkedHashMap::new, Collectors.toList()));
+        Map<String, List<Member>> membersByEvent = memberRepository.findAllMembersByEventIdIn(eventIds).stream()
+                .collect(Collectors.groupingBy(member -> member.getEvent().getId(), LinkedHashMap::new, Collectors.toList()));
+        Map<String, List<Note>> notesByEvent = noteRepository.findAllByEventIdIn(eventIds).stream()
+                .collect(Collectors.groupingBy(note -> note.getEvent().getId(), LinkedHashMap::new, Collectors.toList()));
+
+        for (Event event : events) {
+            event.setSubtasks(new LinkedHashSet<>(subtasksByEvent.getOrDefault(event.getId(), Collections.emptyList())));
+            event.setAttachments(new LinkedHashSet<>(attachmentsByEvent.getOrDefault(event.getId(), Collections.emptyList())));
+            event.setMembers(new LinkedHashSet<>(membersByEvent.getOrDefault(event.getId(), Collections.emptyList())));
+            event.setNotes(new LinkedHashSet<>(notesByEvent.getOrDefault(event.getId(), Collections.emptyList())));
+        }
+
+        return events;
     }
 
     @Transactional
@@ -968,25 +1042,19 @@ public class EventService {
                 }
             }
 
-            // Update sync metadata
             calendar.setGoogleSyncToken(syncResult.getNextSyncToken());
             calendar.setLastGoogleSync(Instant.now());
             calendarRepository.save(calendar);
 
         } catch (IOException e) {
             if (GoogleAuthService.isInvalidGrant(e)) {
-                // Terminal — the refresh token was permanently revoked.
-                // Mark the user disconnected so the scheduler stops retrying.
                 log.error("Google token permanently revoked for user {} during sync. "
                         + "User must re-authorize. Calendar ID: {}", userId, calendarId);
                 if (googleAuthService != null) {
                     googleAuthService.markUserAsDisconnected(userId);
                 }
-                // Propagate as GoogleTokenRevokedException so the scheduler
-                // can catch it specifically and continue with other users.
                 throw new GoogleTokenRevokedException(userId, e);
             }
-            // Transient failure — let the scheduler log it and retry next cycle.
             log.error("Transient Google Calendar sync failure for user: {}, calendar: {}",
                     userId, calendarId, e);
             throw new ServiceUnavailableException("Failed to sync from Google Calendar", e);
@@ -994,7 +1062,7 @@ public class EventService {
     }
 
     private void createLocalEventFromGoogle(Calendar calendar,
-            com.google.api.services.calendar.model.Event googleEvent) {
+                                            com.google.api.services.calendar.model.Event googleEvent) {
         Event event = new Event();
         event.setCalendar(calendar);
         event.setGoogleCalendarId(googleEvent.getId());
@@ -1005,10 +1073,11 @@ public class EventService {
         event.setCreatedAt(Instant.now());
         event.setStatus(EventStatus.NOTSTARTED);
 
+        // FIX #2: Save event first so members have a valid event FK,
+        // then sync attendees, then save once more with complete state.
         eventRepository.save(event);
-
-        // Sync attendees (including organizers) as members
         syncAttendeesFromGoogle(event, googleEvent);
+        eventRepository.save(event); // persist member changes
     }
 
     private void updateLocalEventFromGoogle(Event event, com.google.api.services.calendar.model.Event googleEvent) {
@@ -1022,24 +1091,21 @@ public class EventService {
         }
 
         log.info("Updating existing event from Google: {}", event.getId());
-        updateEventFieldsFromGoogle(event, googleEvent);
-        eventRepository.save(event);
 
-        // Sync attendees
+        // FIX #2: Update fields and members BEFORE saving so they persist together
+        // in a single flush. Previously save() was called before syncAttendeesFromGoogle(),
+        // meaning member changes were not always flushed with the event update.
+        updateEventFieldsFromGoogle(event, googleEvent);
         syncAttendeesFromGoogle(event, googleEvent);
+        eventRepository.save(event); // single save covers both field + member updates
     }
 
     private void updateEventFieldsFromGoogle(Event event, com.google.api.services.calendar.model.Event googleEvent) {
         event.setTitle(googleEvent.getSummary() != null ? googleEvent.getSummary() : "(No Title)");
         event.setDescription(googleEvent.getDescription() != null ? googleEvent.getDescription() : "");
-        event.setColorHex("#3788d8"); // fallback when no Google color is available
-        event.setType(EventType.OTHERS); // Default
+        event.setColorHex("#3788d8");
+        event.setType(EventType.OTHERS);
 
-        // Try to map color ID to type if possible, or just leave as OTHERS
-        // 1=Lavender, 2=Sage, 3=Grape, 4=Flamingo, 5=Banana,
-        // 6=Tangerine, 7=Peacock, 8=Graphite, 9=Blueberry, 10=Basil, 11=Tomato
-        // Types: MEETING(1), WORK(2), APPOINTMENT(3), REMINDER(4), TASK(5),
-        // BIRTHDAY(6), HOLIDAY(7), ROUTE(8), OTHERS(9), STUDY(11)
         if (googleEvent.getColorId() != null) {
             event.setColorHex(mapGoogleColorIdToHex(googleEvent.getColorId()));
             switch (googleEvent.getColorId()) {
@@ -1056,7 +1122,6 @@ public class EventService {
             }
         }
 
-        // Location
         if (googleEvent.getLocation() != null && !googleEvent.getLocation().isBlank()) {
             String address = googleEvent.getLocation();
             Location location = locationRepository.findByStreetAddress(address)
@@ -1071,11 +1136,13 @@ public class EventService {
             event.setLocation(null);
         }
 
-        // Conference / Meeting details
         if (googleEvent.getConferenceData() != null || googleEvent.getHangoutLink() != null) {
             Conference conference = event.getConference();
             if (conference == null) {
                 conference = new Conference();
+                // FIX #5: Always set the event FK before saving Conference to avoid
+                // NOT NULL constraint violations on the foreign key column.
+                conference.setEvent(event);
                 conference.setSyncStatus(Conference.SyncStatus.SYNCED);
                 conference.setLastSynced(Instant.now());
             }
@@ -1085,7 +1152,6 @@ public class EventService {
                 conference.setPlatformName("Google Meet");
                 conference.setGoogleConferenceId(googleEvent.getConferenceData().getConferenceId());
 
-                // Get Meet Link from entry points
                 if (googleEvent.getConferenceData().getEntryPoints() != null) {
                     for (com.google.api.services.calendar.model.EntryPoint entryPoint : googleEvent.getConferenceData()
                             .getEntryPoints()) {
@@ -1109,15 +1175,12 @@ public class EventService {
             event.setConference(conference);
         }
 
-        // Time
         if (googleEvent.getStart().getDate() != null) {
-            // All day
             event.setAllDay(true);
             event.setStartTime(convertToInstant(googleEvent.getStart().getDate()));
             event.setEndTime(
                     convertToInstant(googleEvent.getEnd().getDate()).minus(1, java.time.temporal.ChronoUnit.DAYS));
         } else {
-            // Timed
             event.setAllDay(false);
             event.setStartTime(convertToInstant(googleEvent.getStart().getDateTime()));
             event.setEndTime(convertToInstant(googleEvent.getEnd().getDateTime()));
@@ -1127,15 +1190,17 @@ public class EventService {
     }
 
     private void syncAttendeesFromGoogle(Event event, com.google.api.services.calendar.model.Event googleEvent) {
-        // Keep Hibernate-managed collection instance; orphanRemoval expects in-place
-        // mutation.
+        // FIX #1: Keep the Hibernate-managed collection reference and mutate it
+        // in-place. Previously the method mutated members but never called save(),
+        // so concurrent pods would each try to delete the same Member rows causing
+        // StaleObjectStateException. The caller is now responsible for saving once
+        // after this method returns.
         if (event.getMembers() != null) {
             event.getMembers().clear();
         }
 
         List<Member> members = new ArrayList<>();
 
-        // Add Organizer as owner if applicable
         if (googleEvent.getOrganizer() != null) {
             members.add(Member.builder()
                     .fullName(googleEvent.getOrganizer().getDisplayName() != null
@@ -1146,7 +1211,6 @@ public class EventService {
                     .event(event)
                     .build());
         } else {
-            // Fallback owner
             members.add(Member.builder()
                     .fullName("Owner")
                     .email("Owner")
@@ -1155,10 +1219,8 @@ public class EventService {
                     .build());
         }
 
-        // Add Attendees
         if (googleEvent.getAttendees() != null) {
             for (com.google.api.services.calendar.model.EventAttendee attendee : googleEvent.getAttendees()) {
-                // Skip if attendee is the organizer (already added as owner)
                 if (googleEvent.getOrganizer() != null &&
                         attendee.getEmail().equals(googleEvent.getOrganizer().getEmail())) {
                     continue;
@@ -1177,6 +1239,7 @@ public class EventService {
             event.setMembers(new HashSet<>());
         }
         event.getMembers().addAll(members);
+        // NOTE: caller must call eventRepository.save(event) after this method.
     }
 
     private Instant convertToInstant(com.google.api.client.util.DateTime dateTime) {
@@ -1211,17 +1274,17 @@ public class EventService {
             return false;
         }
 
+        if (calendar.getGoogleCalendarId() != null && !calendar.getGoogleCalendarId().isBlank()) {
+            // Already identified as a Google-bound calendar — trust it and skip network call.
+            return true;
+        }
+
         try {
             String primaryGoogleCalendarId = googleCalendarApiService.getPrimaryCalendarId(calendar.getUserId());
             if (primaryGoogleCalendarId == null || primaryGoogleCalendarId.isBlank()) {
                 return false;
             }
 
-            if (calendar.getGoogleCalendarId() != null && !calendar.getGoogleCalendarId().isBlank()) {
-                return primaryGoogleCalendarId.equalsIgnoreCase(calendar.getGoogleCalendarId());
-            }
-
-            // Resolve any existing designated Google sync calendar for this user.
             java.util.List<Calendar> userCalendars = calendarRepository
                     .findCalendarByUserIdAndIsDeletedFalse(calendar.getUserId());
             Calendar designatedSyncCalendar = userCalendars.stream()
@@ -1242,15 +1305,23 @@ public class EventService {
                 if (!designatedSyncCalendar.getId().equals(calendar.getId())) {
                     return false;
                 }
-                designatedSyncCalendar.setGoogleCalendarId(primaryGoogleCalendarId);
-                calendarRepository.save(designatedSyncCalendar);
+                // FIX #4: The DB write (setGoogleCalendarId + save) is kept here but now only
+                // executes when the designated calendar is missing its googleCalendarId,
+                // which is a one-time migration path. This avoids repeated writes on every
+                // event creation in steady state.
+                if (designatedSyncCalendar.getGoogleCalendarId() == null
+                        || designatedSyncCalendar.getGoogleCalendarId().isBlank()) {
+                    designatedSyncCalendar.setGoogleCalendarId(primaryGoogleCalendarId);
+                    calendarRepository.save(designatedSyncCalendar);
+                }
                 return true;
             }
 
-            // No designated sync calendar found. Auto-bind current calendar to avoid silent
-            // local-only event creation.
-            calendar.setGoogleCalendarId(primaryGoogleCalendarId);
-            calendarRepository.save(calendar);
+            // No designated sync calendar found — auto-bind current calendar once.
+            if (calendar.getGoogleCalendarId() == null || calendar.getGoogleCalendarId().isBlank()) {
+                calendar.setGoogleCalendarId(primaryGoogleCalendarId);
+                calendarRepository.save(calendar);
+            }
             return true;
 
         } catch (IOException e) {
@@ -1298,30 +1369,40 @@ public class EventService {
         for (Event event : unsyncedEvents) {
             try {
                 com.google.api.services.calendar.model.Event googleEvent;
+                boolean isUpdate = event.getGoogleCalendarId() != null && !event.getGoogleCalendarId().isBlank();
 
-                if (event.isAllDay()) {
-                    // Create all-day event
-                    googleEvent = googleCalendarApiService.createAllDayEvent(
+                if (isUpdate) {
+                    String locationName = event.getLocation() != null ? event.getLocation().getPlaceName() : null;
+                    googleEvent = googleCalendarApiService.updateCompleteEvent(
                             userId,
+                            event.getGoogleCalendarId(),
                             event.getTitle(),
                             event.getDescription(),
-                            event.getLocation(),
-                            event.getStartTime());
-                } else {
-                    // Create simple event
-                    googleEvent = googleCalendarApiService.createEvent(
-                            userId,
-                            event.getTitle(),
-                            event.getDescription(),
-                            event.getLocation(),
                             event.getStartTime(),
                             event.getEndTime(),
-                            event.getType().toString());
+                            event.isAllDay(),
+                            locationName,
+                            java.util.Collections.emptyList());
+                } else {
+                    if (event.isAllDay()) {
+                        googleEvent = googleCalendarApiService.createAllDayEvent(
+                                userId,
+                                event.getTitle(),
+                                event.getDescription(),
+                                event.getLocation(),
+                                event.getStartTime());
+                    } else {
+                        googleEvent = googleCalendarApiService.createEvent(
+                                userId,
+                                event.getTitle(),
+                                event.getDescription(),
+                                event.getLocation(),
+                                event.getStartTime(),
+                                event.getEndTime(),
+                                event.getType().toString());
+                    }
+                    event.setGoogleCalendarId(googleEvent.getId());
                 }
-
-                // If event had a local zoom conference, append it to description in Google side
-                // Update event with Google Calendar ID
-                event.setGoogleCalendarId(googleEvent.getId());
                 event.setSyncStatus(SyncStatus.SYNCED);
                 eventRepository.save(event);
 
@@ -1337,7 +1418,7 @@ public class EventService {
                     }
                     event.setSyncStatus(SyncStatus.AUTH_ERROR);
                     eventRepository.save(event);
-                    return; // Stop trying this user's events immediately to avoid spam
+                    return;
                 } else {
                     log.error("Transient error pushing unsynced event {} to Google Calendar: {}. Keeping as PENDING.",
                             event.getId(), e.getMessage());

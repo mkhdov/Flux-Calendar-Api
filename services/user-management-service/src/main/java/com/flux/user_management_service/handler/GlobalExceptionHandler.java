@@ -52,7 +52,12 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<ErrorResponse> handleException(Exception exp) {
+    public ResponseEntity<ErrorResponse> handleException(Exception exp) throws Exception {
+        // Don't intercept Spring's own framework exceptions (e.g. actuator, 404s)
+        if (exp instanceof org.springframework.web.server.ResponseStatusException
+                || exp instanceof org.springframework.web.servlet.resource.NoResourceFoundException) {
+            throw exp;
+        }
         Map<String, String> errors = new HashMap<>();
         errors.put("error", exp.getMessage());
         return ResponseEntity

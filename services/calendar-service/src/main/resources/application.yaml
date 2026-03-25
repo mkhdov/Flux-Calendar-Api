@@ -1,4 +1,11 @@
 spring:
+  cache:
+    redis:
+      enable-statistics: true
+  servlet:
+    multipart:
+      max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:1GB}
+      max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:1GB}
   config:
     import: optional:configserver:${CONFIG_SERVER_URL}
   cloud:

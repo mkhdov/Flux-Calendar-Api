@@ -1,0 +1,1 @@
+CREATE INDEX idx_event_calendar_time ON events (calendar_id, start_time, end_time);

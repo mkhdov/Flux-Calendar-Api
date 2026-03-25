@@ -8,4 +8,6 @@ import java.util.List;
 @Repository
 public interface AttachmentRepository extends JpaRepository<Attachment, String> {
     List<Attachment> findByEventId(String eventId);
+
+    List<Attachment> findByEventIdIn(List<String> eventIds);
 }

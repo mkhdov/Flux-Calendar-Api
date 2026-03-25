@@ -2,6 +2,7 @@ package com.flux.calendar_service.kafka;
 
 import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.calendar.CalendarRepository;
+import com.flux.calendar_service.connects.ConnectService;
 import com.flux.calendar_service.user.UserSync;
 import com.flux.calendar_service.user.UserSyncRepository;
 
@@ -24,6 +25,7 @@ public class UserConsumer {
 
     private final UserSyncRepository userSyncRepository;
     private final CalendarRepository calendarRepository;
+    private final ConnectService connectService;
 
     @KafkaListener(topics = "user-topic", groupId = "calendar-group")
     public void consumeUserEvent(UserEvent event) {
@@ -42,6 +44,7 @@ public class UserConsumer {
 
         if (USER_CREATED_TYPE.equals(event.getType())) {
             createDefaultCalendarIfMissing(event.getUserId());
+            connectService.create(event.getUserId());
         }
 
         UserSync userSync = UserSync.builder()
@@ -79,4 +82,5 @@ public class UserConsumer {
         calendarRepository.save(defaultCalendar);
         log.info("Created default calendar for user ID: {}", userId);
     }
+
 }

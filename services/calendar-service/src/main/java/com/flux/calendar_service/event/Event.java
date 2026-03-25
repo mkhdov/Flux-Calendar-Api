@@ -53,7 +53,7 @@ public class Event {
     @EqualsAndHashCode.Include
     private String id;
 
-    @Column(name = "google_calendar_id")
+    @Column(name = "google_calendar_id", unique = true)
     private String googleCalendarId;
 
     @Column(name = "google_updated_at")

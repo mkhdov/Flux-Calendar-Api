@@ -10,6 +10,7 @@ import com.flux.calendar_service.google.GoogleCalendarApiService;
 import com.flux.calendar_service.location.LocationMapper;
 import com.flux.calendar_service.location.LocationRepository;
 import com.flux.calendar_service.member.MemberRepository;
+import com.flux.calendar_service.event.dto.EventMonthResponse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -18,8 +19,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -49,6 +52,14 @@ class EventServiceTest {
     private MemberRepository memberRepository;
     @Mock
     private GoogleCalendarApiService googleCalendarApiService;
+    @Mock
+    private com.flux.calendar_service.subtask.SubtaskRepository subtaskRepository;
+    @Mock
+    private com.flux.calendar_service.attachment.AttachmentRepository attachmentRepository;
+    @Mock
+    private com.flux.calendar_service.note.NoteRepository noteRepository;
+    @Mock
+    private EventRangeValidator rangeValidator;
 
     @InjectMocks
     private EventService eventService;
@@ -127,5 +138,129 @@ class EventServiceTest {
 
         assertNotNull(result);
         assertEquals("1", result.id());
+    }
+
+    @Test
+    void getEventsByMonth_ShouldReturnList() {
+        String calendarId = "cal1";
+        int year = 2023;
+        int month = 10;
+        Instant now = Instant.now();
+        Event event = new Event();
+        event.setId("1");
+        
+        EventMonthResponse response = new EventMonthResponse(
+                "1", "Event 1", "#000", now, now.plusSeconds(3600));
+
+        when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class), any(Instant.class)))
+            .thenReturn(List.of(event));
+        when(subtaskRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+        when(attachmentRepository.findByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+        when(memberRepository.findAllMembersByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+        when(noteRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+        when(eventMapper.toEventMonthResponse(event)).thenReturn(response);
+
+        List<EventMonthResponse> results = eventService.getEventsByMonth(calendarId, year, month);
+
+        assertEquals(1, results.size());
+        assertEquals("1", results.get(0).id());
+    }
+
+    // ── Range validation tests ──────────────────────────────────
+
+    @Test
+    void getEventsByDateRange_DelegatesToRangeValidator() {
+        Instant start = Instant.now();
+        Instant end = start.plus(3, ChronoUnit.DAYS);
+
+        when(eventRepository.findEventsByRangeFiltered(eq("cal1"), any(), any()))
+                .thenReturn(Collections.emptyList());
+
+        eventService.getEventsByDateRange("cal1", start, end);
+
+        verify(rangeValidator).validate(ViewType.WEEK, start, end);
+    }
+
+    @Test
+    void getEventsByDateRange_ExceedingSevenDays_ShouldThrowBadRequest() {
+        Instant start = Instant.now();
+        Instant end = start.plus(10, ChronoUnit.DAYS);
+
+        doThrow(new ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST, "Week view supports max 7 days"))
+                .when(rangeValidator).validate(ViewType.WEEK, start, end);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
+                eventService.getEventsByDateRange("cal1", start, end));
+
+        assertEquals(400, ex.getStatusCode().value());
+        assertTrue(ex.getReason().contains("Week view supports max 7 days"));
+    }
+
+    @Test
+    void getEventsByDateRange_ZeroDayRange_ShouldThrowBadRequest() {
+        Instant start = Instant.now();
+        Instant end = start.plusSeconds(30);
+
+        doThrow(new ResponseStatusException(
+                org.springframework.http.HttpStatus.BAD_REQUEST, "Invalid date range: must span at least 1 day"))
+                .when(rangeValidator).validate(ViewType.WEEK, start, end);
+
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
+                eventService.getEventsByDateRange("cal1", start, end));
+
+        assertEquals(400, ex.getStatusCode().value());
+        assertTrue(ex.getReason().contains("Invalid date range"));
+    }
+
+    // ── Month validation tests ──────────────────────────────────
+
+    @Test
+    void getEventsByMonth_DelegatesToRangeValidator() {
+        String calendarId = "cal1";
+        Event event = new Event();
+        event.setId("1");
+        Instant now = Instant.now();
+        EventMonthResponse response = new EventMonthResponse(
+                "1", "Event 1", "#000", now, now.plusSeconds(3600));
+
+        when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class), any(Instant.class)))
+                .thenReturn(List.of(event));
+        when(subtaskRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+        when(attachmentRepository.findByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+        when(memberRepository.findAllMembersByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+        when(noteRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+        when(eventMapper.toEventMonthResponse(event)).thenReturn(response);
+
+        eventService.getEventsByMonth(calendarId, 2023, 10);
+
+        verify(rangeValidator).validate(eq(ViewType.MONTH), any(Instant.class), any(Instant.class));
+    }
+
+    @Test
+    void getEventsByMonth_WithInvalidMonth_ShouldThrowBadRequest() {
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
+                eventService.getEventsByMonth("cal1", 2023, 13));
+
+        assertEquals(400, ex.getStatusCode().value());
+        assertTrue(ex.getReason().contains("Month must be between 1 and 12"));
+    }
+
+    @Test
+    void getEventsByMonth_WithZeroMonth_ShouldThrowBadRequest() {
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
+                eventService.getEventsByMonth("cal1", 2023, 0));
+
+        assertEquals(400, ex.getStatusCode().value());
+        assertTrue(ex.getReason().contains("Month must be between 1 and 12"));
+    }
+
+    @Test
+    void getEventsByMonth_WithInvalidYear_ShouldThrowBadRequest() {
+        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
+                eventService.getEventsByMonth("cal1", -1, 6));
+
+        assertEquals(400, ex.getStatusCode().value());
+        assertTrue(ex.getReason().contains("Year must be between 1 and 9999"));
     }
 }

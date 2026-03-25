@@ -10,6 +10,7 @@ import com.flux.calendar_service.calendar.CalendarMapper;
 import com.flux.calendar_service.conference.ConferenceMapper;
 import com.flux.calendar_service.event.dto.EventRequest;
 import com.flux.calendar_service.event.dto.EventResponse;
+import com.flux.calendar_service.event.dto.EventMonthResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
 import com.flux.calendar_service.location.LocationMapper;
 import com.flux.calendar_service.member.MemberMapper;
@@ -66,6 +67,43 @@ public class EventMapper {
                         : Collections.emptyList(),
                 event.getCreatedAt(),
                 event.getUpdatedAt());
+    }
+
+    public EventMonthResponse toEventMonthResponse(Event event) {
+        if (event == null) {
+            return null;
+        }
+
+        return new EventMonthResponse(
+                event.getId(),
+                event.getTitle(),
+                event.getColorHex(),
+                event.getStartTime(),
+                event.getEndTime()
+        );
+    }
+
+    public com.flux.calendar_service.event.dto.EventRangeResponse toEventRangeResponse(com.flux.calendar_service.event.dto.EventRangeProjection projection) {
+        if (projection == null) {
+            return null;
+        }
+
+        return new com.flux.calendar_service.event.dto.EventRangeResponse(
+                projection.getId(),
+                projection.getCalendarId(),
+                projection.getTitle(),
+                projection.getColorHex(),
+                projection.getStartTime(),
+                projection.getEndTime(),
+                projection.isAllDay(),
+                projection.getStatus(),
+                projection.getHasLocation(),
+                projection.getHasConference(),
+                projection.getHasAttachment(),
+                projection.getHasSubtasks(),
+                projection.getHasMember(),
+                projection.getHasNotes()
+        );
     }
 
     public Event toEvent(EventRequest request, Calendar calendar) {

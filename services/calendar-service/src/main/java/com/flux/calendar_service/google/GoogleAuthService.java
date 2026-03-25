@@ -5,6 +5,7 @@ import java.time.OffsetDateTime;
 import java.util.Collections;
 import java.util.List;
 
+import com.flux.calendar_service.connects.ConnectService;
 import com.flux.calendar_service.exception.GoogleTokenRevokedException;
 import com.flux.calendar_service.user.UserSyncRepository;
 import com.google.api.client.auth.oauth2.Credential;
@@ -12,13 +13,12 @@ import com.google.api.client.auth.oauth2.TokenResponse;
 import com.google.api.client.auth.oauth2.TokenResponseException;
 import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeFlow;
 import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
-import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
-import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.http.HttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.gson.GsonFactory;
-import com.google.api.client.util.store.FileDataStoreFactory;
 import com.google.api.services.calendar.CalendarScopes;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -30,6 +30,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 @ConditionalOnProperty(name = "google.calendar.enabled", havingValue = "true", matchIfMissing = false)
+@RequiredArgsConstructor
 public class GoogleAuthService {
 
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
@@ -44,11 +45,16 @@ public class GoogleAuthService {
     @Value("${google.calendar.redirect-uri:http://localhost:8080/auth/google/callback}")
     private String redirectUri;
 
-    private NetHttpTransport httpTransport;
+    private final HttpTransport httpTransport;
+    private final ConnectService connectService;
+
     private GoogleAuthorizationCodeFlow flow;
 
     @Autowired
     private UserSyncRepository userSyncRepository;
+
+    @Autowired
+    private GoogleTokenService googleTokenService;
 
     // ─────────────────────────────────────────────────────────────────────────
     // INITIALISATION
@@ -56,9 +62,8 @@ public class GoogleAuthService {
 
     @PostConstruct
     public void initialize() throws Exception {
-        this.httpTransport = GoogleNetHttpTransport.newTrustedTransport();
         initializeFlowFromConfig();
-        log.info("Google OAuth Service initialized. Redirect URI: {}", redirectUri);
+        log.info("Google OAuth Service initialized. Redirect url is secured!");
     }
 
     private void initializeFlowFromConfig() throws IOException {
@@ -77,11 +82,8 @@ public class GoogleAuthService {
 
         GoogleClientSecrets clientSecrets = new GoogleClientSecrets().setWeb(details);
 
-        FileDataStoreFactory dataStoreFactory = new FileDataStoreFactory(new java.io.File("tokens"));
-
         this.flow = new GoogleAuthorizationCodeFlow.Builder(
                 httpTransport, JSON_FACTORY, clientSecrets, SCOPES)
-                .setDataStoreFactory(dataStoreFactory)
                 .setAccessType("offline")
                 .setApprovalPrompt("force") // ensures a refresh token is always issued
                 .build();
@@ -165,7 +167,7 @@ public class GoogleAuthService {
             TokenResponse response = flow.newTokenRequest(authorizationCode)
                     .setRedirectUri(redirectUri)
                     .execute();
-            Credential credential = flow.createAndStoreCredential(response, userId);
+            Credential credential = googleTokenService.saveTokenFromResponse(userId, response);
             log.info("Token exchange successful for user: {}", userId);
             return credential;
         } catch (IOException e) {
@@ -184,7 +186,7 @@ public class GoogleAuthService {
             TokenResponse response = flow.newTokenRequest(authorizationCode)
                     .setRedirectUri(effectiveRedirectUri)
                     .execute();
-            Credential credential = flow.createAndStoreCredential(response, userId);
+            Credential credential = googleTokenService.saveTokenFromResponse(userId, response);
             log.info("Token exchange successful for user: {}", userId);
             return credential;
         } catch (IOException e) {
@@ -218,52 +220,17 @@ public class GoogleAuthService {
      *                                     revoked
      * @throws IOException                 for transient failures
      */
-    public boolean refreshAccessToken(Credential credential, String userId) throws IOException {
-        if (credential.getRefreshToken() == null) {
-            log.error("No refresh token stored for user: {}. Re-authorization required.", userId);
-            markUserAsDisconnected(userId);
-            throw new GoogleTokenRevokedException(userId);
-        }
-
+    public Credential refreshAccessToken(String userId) throws IOException {
         try {
-            boolean refreshed = credential.refreshToken();
-            if (refreshed) {
+            Credential credential = googleTokenService.refreshAccessToken(userId);
+            if (credential != null) {
                 log.debug("Access token refreshed successfully for user: {}", userId);
-            } else {
-                log.warn("Token refresh returned false for user: {} — no new token issued.", userId);
             }
-            return refreshed;
-
-        } catch (TokenResponseException e) {
-            if (isInvalidGrant(e)) {
-                // ── TERMINAL ────────────────────────────────────────────────────────────
-                // This refresh token can never be used again.
-                // 1. Mark user disconnected in DB (scheduler will skip them next cycle)
-                // 2. Purge the dead credential from the token store (no point keeping it)
-                // 3. Throw a typed exception so callers can handle it intentionally
-                String errorDescription = e.getDetails() != null
-                        ? e.getDetails().getErrorDescription()
-                        : "unknown";
-                log.error("Google refresh token permanently revoked for user: {}. "
-                        + "Reason: '{}'. User must re-authorize.", userId, errorDescription);
-                markUserAsDisconnected(userId);
-                purgeStoredCredential(userId);
-                throw new GoogleTokenRevokedException(userId, e);
-            }
-            // Transient failure (network, server 5xx, clock skew, etc.) — safe to retry
-            log.warn("Transient token refresh failure for user: {}. Will retry next cycle. Error: {}",
-                    userId, e.getMessage());
+            return credential;
+        } catch (GoogleTokenRevokedException e) {
+            markUserAsDisconnected(userId);
             throw e;
         }
-    }
-
-    /**
-     * Backward-compatible overload that delegates to
-     * {@link #refreshAccessToken(Credential, String)} with userId="unknown".
-     * Prefer the two-argument form whenever a userId is available.
-     */
-    public boolean refreshAccessToken(Credential credential) throws IOException {
-        return refreshAccessToken(credential, "unknown");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -280,8 +247,8 @@ public class GoogleAuthService {
             userSync.setGoogleConnected(false);
             userSync.setGoogleDisconnectedAt(OffsetDateTime.now());
             userSyncRepository.save(userSync);
-            log.warn("User {} marked as Google-disconnected. "
-                    + "Sync paused until user re-authorizes.", userId);
+//          calling method for disconnect to mark google as connected -->
+            connectService.disconnectGoogle(userId);
         });
     }
 
@@ -300,14 +267,19 @@ public class GoogleAuthService {
      *                    user@gmail.com)
      */
     public void markUserAsConnected(String userId, String googleEmail) {
-        userSyncRepository.findById(userId).ifPresentOrElse(userSync -> {
-            userSync.setGoogleConnected(true);
-            userSync.setGoogleDisconnectedAt(null);
-            userSync.setGoogleEmail(googleEmail);
-            userSyncRepository.save(userSync);
-            log.info("User {} marked as Google-connected (account: {}).", userId, googleEmail);
-        }, () -> log.warn("markUserAsConnected: no UserSync record found for userId: {}. "
-                + "The record may not have been created yet.", userId));
+        com.flux.calendar_service.user.UserSync userSync = userSyncRepository.findById(userId)
+                .orElseGet(() -> {
+                    com.flux.calendar_service.user.UserSync newUser = new com.flux.calendar_service.user.UserSync();
+                    newUser.setId(userId);
+                    return newUser;
+                });
+
+        userSync.setGoogleConnected(true);
+        userSync.setGoogleDisconnectedAt(null);
+        userSync.setGoogleEmail(googleEmail);
+        userSyncRepository.save(userSync);
+//      calling method for connect to mark google as connected -->
+        connectService.connectGoogle(userId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -324,22 +296,6 @@ public class GoogleAuthService {
                             "https://oauth2.googleapis.com/revoke?token="
                                     + credential.getAccessToken()))
                     .execute();
-            log.info("Google OAuth token revoked successfully.");
-        }
-    }
-
-    /**
-     * Removes a stored (broken) credential from the token DataStore so the
-     * scheduler does not keep loading and reusing it.
-     */
-    private void purgeStoredCredential(String userId) {
-        try {
-            if (flow != null && flow.getCredentialDataStore() != null) {
-                flow.getCredentialDataStore().delete(userId);
-                log.info("Purged stored credential from DataStore for user: {}", userId);
-            }
-        } catch (IOException ex) {
-            log.error("Failed to purge credential from DataStore for user: {}", userId, ex);
         }
     }
 
@@ -364,11 +320,16 @@ public class GoogleAuthService {
      * Returns {@code null} if no credential has been stored (user never authorized
      * or the credential was purged after an invalid_grant).
      */
-    public Credential getLoadedCredential(String userId) throws IOException {
-        if (flow == null || userId == null) {
+    public Credential getValidCredential(String userId) throws IOException {
+        if (userId == null || userId.isBlank()) {
             return null;
         }
-        return flow.loadCredential(userId);
+        try {
+            return googleTokenService.getValidCredential(userId);
+        } catch (GoogleTokenRevokedException e) {
+            markUserAsDisconnected(userId);
+            throw e;
+        }
     }
 
     public GoogleAuthorizationCodeFlow getFlow() {

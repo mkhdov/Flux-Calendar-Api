@@ -46,6 +46,7 @@ export MINIO_ENDPOINT="http://localhost:9000"
 export MINIO_ACCESS_KEY="maxvpirea"
 export MINIO_SECRET_KEY="Max26156@vpire"
 export MINIO_BUCKET="attachments"
+export MINIO_EXTERNAL_URL="http://localhost:9000"
 
 # ============ EUREKA CONFIGURATION ============
 export EUREKA_SERVICE_URL="http://localhost:8761/eureka"

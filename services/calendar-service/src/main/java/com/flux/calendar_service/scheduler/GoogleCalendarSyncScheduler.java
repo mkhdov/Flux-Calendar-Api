@@ -13,6 +13,8 @@ import com.flux.calendar_service.google.GoogleCalendarApiService;
 import com.flux.calendar_service.user.UserSyncRepository;
 import com.google.api.client.auth.oauth2.Credential;
 
+import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -24,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 @ConditionalOnProperty(name = "google.calendar.enabled", havingValue = "true", matchIfMissing = false)
+@EnableSchedulerLock(defaultLockAtMostFor = "PT2M")
 public class GoogleCalendarSyncScheduler {
 
     private final CalendarRepository calendarRepository;
@@ -45,6 +48,7 @@ public class GoogleCalendarSyncScheduler {
      * Runs every minute (cron {@code "0 * * * * *"}).
      */
     @Scheduled(cron = "0 * * * * *")
+    @SchedulerLock(name = "googleCalendarSync", lockAtMostFor = "PT2M", lockAtLeastFor = "PT50S")
     public void syncAllAuthorizedUsers() {
         log.info("Starting background Google Calendar synchronization...");
 
@@ -65,31 +69,32 @@ public class GoogleCalendarSyncScheduler {
         for (String userId : candidateUserIds) {
             try {
                 // ── Step 1: Load stored credential ──────────────────────────────────────
-                Credential credential = googleAuthService.getLoadedCredential(userId);
+                Credential credential = googleAuthService.getValidCredential(userId);
                 if (credential == null) {
-                    // Token file was purged (pod restart, manual delete) — skip until re-auth
+                    // No token stored in DB — skip until re-auth
                     log.debug("No stored credential for user {}. Skipping.", userId);
                     skippedCount++;
                     continue;
                 }
 
-                // ── Step 2: Proactive token refresh if expiring in < 5 minutes ─────────
-                Long expiresIn = credential.getExpiresInSeconds();
-                if (expiresIn == null || expiresIn < 300) {
-                    log.debug("Access token expiring soon for user {}. Refreshing proactively.", userId);
-                    // refreshAccessToken() throws GoogleTokenRevokedException on invalid_grant,
-                    // which is caught in the block below — the scheduler loop continues safely.
-                    googleAuthService.refreshAccessToken(credential, userId);
-                }
-
                 // ── Step 3: Resolve the local calendar linked to Google ──────────────────
-                String googleCalendarId = googleCalendarApiService.getPrimaryCalendarId(userId);
+                // Optimized: Check if a calendar for this user already has a bound Google ID.
+                java.util.Optional<Calendar> syncCalendar = calendarRepository.findCalendarByUserIdAndIsDeletedFalse(userId).stream()
+                        .filter(c -> c.getGoogleCalendarId() != null && !c.getGoogleCalendarId().isBlank())
+                        .findFirst();
 
-                java.util.Optional<Calendar> syncCalendar = calendarRepository
+                String googleCalendarId;
+                if (syncCalendar.isPresent()) {
+                    googleCalendarId = syncCalendar.get().getGoogleCalendarId();
+                } else {
+                    // Fallback to Google API only if no bound calendar exists locally
+                    googleCalendarId = googleCalendarApiService.getPrimaryCalendarId(userId);
+                    syncCalendar = calendarRepository
                         .findByUserIdAndGoogleCalendarIdAndIsDeletedFalse(userId, googleCalendarId)
                         .or(() -> calendarRepository.findByUserIdAndTitleAndIsDeletedFalse(userId, googleCalendarId))
                         .or(() -> calendarRepository.findByUserIdAndDescriptionAndIsDeletedFalse(
                                 userId, "Google sync calendar for " + googleCalendarId));
+                }
 
                 if (syncCalendar.isEmpty()) {
                     log.warn("No local sync calendar found for user {} / Google calendar '{}'. Skipping.",
@@ -115,7 +120,7 @@ public class GoogleCalendarSyncScheduler {
 
             } catch (GoogleTokenRevokedException e) {
                 // ── TERMINAL — invalid_grant ─────────────────────────────────────────────
-                // markUserAsDisconnected() was already called inside refreshAccessToken().
+                // markUserAsDisconnected() was already called during token refresh.
                 // We just log and continue to the next user. The user will see a
                 // "Reconnect Google Calendar" prompt on their next login.
                 log.warn("Google token permanently revoked for user {}. "

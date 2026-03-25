@@ -1,8 +1,9 @@
 spring:
   servlet:
     multipart:
-      max-file-size: 100MB
-      max-request-size: 100MB
+      max-file-size: 1GB
+      max-request-size: 1GB
+      resolve-lazily: true
 
   datasource:
     url: ${CALENDAR_PGURL}
@@ -10,7 +11,11 @@ spring:
     password: ${CALENDAR_PGPASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 5
+      maximum-pool-size: 40        # tune based on your DB server
+      minimum-idle: 10
+      connection-timeout: 3000
+      idle-timeout: 600000
+      max-lifetime: 1800000
 
   redis:
     host: ${REDIS_HOST}
@@ -19,14 +24,27 @@ spring:
     timeout: ${REDIS_TIMEOUT}
     lettuce:
       pool:
-        max-active: 8
-        max-idle: 8
+        max-active: 50
+        max-idle: 20
+        min-idle: 5
+        max-wait: 2000ms
 
   jpa:
     hibernate:
       ddl-auto: none
-    show-sql: true
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        generate_statistics: false
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
     database-platform: org.hibernate.dialect.PostgreSQLDialect
+
+  cache:
+    type: redis
 
   security:
     oauth2:
@@ -82,7 +100,7 @@ google:
     redirect-uri: ${GOOGLE_REDIRECT_URI}
     scope:
       - https://www.googleapis.com/auth/calendar
-    application-name: ${GOOGLE_APPLICATION_NAME}
+    application-name: ${GOOGLE_CALENDAR_APPLICATION_NAME:${GOOGLE_APPLICATION_NAME:Flux Calendar Sync}}
     calendar-id: ${GOOGLE_CALENDAR_ID}
 
 minio:
@@ -90,6 +108,7 @@ minio:
   access-key: ${MINIO_ACCESS_KEY}
   secret-key: ${MINIO_SECRET_KEY}
   bucket: ${MINIO_BUCKET}
+  external-url: ${MINIO_EXTERNAL_URL}
 
 zoom:
   client:
@@ -108,8 +127,18 @@ eureka:
 
 server:
   port: ${CALENDARS_PORT}
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 20
+    accept-count: 100
+    connection-timeout: 5000
 
 app:
   jwt:
     secret: ${JWT_SECRET}
   url: ${APP_JWT_URL}
+  share_url: ${FRONTEND_URL}
+
+user-management-service:
+  url: http://user-management-service:8081

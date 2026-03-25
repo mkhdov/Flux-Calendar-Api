@@ -1,5 +1,17 @@
 package com.flux.calendar_service.member;
 
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
 import com.flux.calendar_service.conference.Conference;
 import com.flux.calendar_service.email.EmailService;
 import com.flux.calendar_service.event.Event;
@@ -10,16 +22,9 @@ import com.flux.calendar_service.exception.UnauthorizedException;
 import com.flux.calendar_service.location.Location;
 import com.flux.calendar_service.member.dto.MemberRequest;
 import com.flux.calendar_service.member.dto.MemberResponseDTO;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
-import java.time.ZoneId;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
-import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -30,8 +35,11 @@ public class MemberService {
     private final MemberRepository memberRepository;
     private final MemberMapper memberMapper;
 
-    @Value("${app.url}")
+    @Value("${app.share_url}")
     private String appUrl;
+
+    @Value("${spring.mail.username}")
+    private String senderEmail;
 
     public void sendInviteUrl(String email, String eventId) {
         Event event = eventService.getEventByIdTypeEvent(eventId);
@@ -42,40 +50,59 @@ public class MemberService {
             return;
         }
 
-        String subject = "Invitation to Join Event";
-        String body = buildEmailBody(event, generateJoinLink(event.getId(), email));
+        String subject = String.format(
+                "You're invited: %s on %s",
+                event.getTitle(),
+                event.getStartTime()
+        );
+        String joinLink = generateJoinLink(event.getId(), email);
+        String body = buildEmailBody(event, joinLink);
 
-        emailService.sendEmail(email, subject, body, buildICS(event));
+        emailService.sendEmail(email, subject, body, buildICS(event, email, joinLink));
     }
 
-    private String buildICS(Event event) {
+    private String buildICS(Event event, String attendeeEmail, String joinUrl) {
+        ZoneId eventZone = resolveEventZone(event);
+        DateTimeFormatter utcFormatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
+                .withZone(ZoneOffset.UTC);
+        DateTimeFormatter localFormatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")
+                .withLocale(Locale.US);
 
-        DateTimeFormatter formatter =
-                DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
-                        .withZone(ZoneOffset.UTC);
+        String dtStamp = utcFormatter.format(Instant.now());
+        String dtStart = event.getStartTime().atZone(eventZone).format(localFormatter);
+        String dtEnd = event.getEndTime().atZone(eventZone).format(localFormatter);
+        String organizerEmail = resolveOrganizerEmail(event);
+        String organizerName = resolveOrganizerName(event);
+        String location = event.getLocation() != null ? event.getLocation().getPlaceName() : "";
 
-        String start = formatter.format(event.getStartTime());
-        String end = formatter.format(event.getEndTime());
+        StringBuilder ics = new StringBuilder();
+        appendIcsLine(ics, "BEGIN:VCALENDAR");
+        appendIcsLine(ics, "PRODID:-//Flux Calendar//EN");
+        appendIcsLine(ics, "VERSION:2.0");
+        appendIcsLine(ics, "CALSCALE:GREGORIAN");
+        appendIcsLine(ics, "METHOD:REQUEST");
+        appendIcsLine(ics, "BEGIN:VEVENT");
+        appendIcsLine(ics, "UID:" + escapeIcsText(event.getId() + "@flux"));
+        appendIcsLine(ics, "DTSTAMP:" + dtStamp);
+        appendIcsLine(ics, "DTSTART;TZID=" + eventZone.getId() + ":" + dtStart);
+        appendIcsLine(ics, "DTEND;TZID=" + eventZone.getId() + ":" + dtEnd);
+        appendIcsLine(ics, "SUMMARY:" + escapeIcsText(event.getTitle()));
+        appendIcsLine(ics, "DESCRIPTION:" + escapeIcsText(event.getDescription()));
+        appendIcsLine(ics, "LOCATION:" + escapeIcsText(location));
+        appendIcsLine(ics, "STATUS:CONFIRMED");
+        appendIcsLine(ics, "SEQUENCE:" + resolveSequence(event));
+        appendIcsLine(ics, "URL:" + escapeIcsText(joinUrl));
+        appendIcsLine(ics, "ORGANIZER;CN=" + escapeIcsParam(organizerName) + ":mailto:" + organizerEmail);
+        appendIcsLine(ics, "ATTENDEE;CN=" + escapeIcsParam(attendeeEmail)
+                + ";ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:" + attendeeEmail);
+        appendIcsLine(ics, "END:VEVENT");
+        appendIcsLine(ics, "END:VCALENDAR");
 
-        return "BEGIN:VCALENDAR\n" +
-                "VERSION:2.0\n" +
-                "PRODID:-//Flux Calendar//EN\n" +
-                "METHOD:REQUEST\n" +
-                "BEGIN:VEVENT\n" +
-                "UID:" + event.getId() + "@flux\n" +
-                "DTSTAMP:" + start + "\n" +
-                "DTSTART:" + start + "\n" +
-                "DTEND:" + end + "\n" +
-                "SUMMARY:" + event.getTitle() + "\n" +
-                "DESCRIPTION:" + event.getDescription() + "\n" +
-                "LOCATION:" + (event.getLocation() != null ? event.getLocation().getPlaceName() : "") + "\n" +
-                "STATUS:CONFIRMED\n" +
-                "END:VEVENT\n" +
-                "END:VCALENDAR";
+        return ics.toString();
     }
 
     private String generateJoinLink(String eventId, String email) {
-        return appUrl + "/members/join/event/" + eventId + "/" + email;
+        return appUrl + "/join?eventId=" + eventId + "&email=" + email;
     }
 
     private String buildEmailBody(Event event, String joinUrl) {
@@ -83,13 +110,15 @@ public class MemberService {
         DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("EEEE, MMM dd yyyy");
         DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
 
+        ZoneId zoneId = ZoneId.of(event.getCalendar().getTimezone());
+
         String date = event.getStartTime()
-                .atZone(ZoneId.systemDefault())
-                .format(dateFormatter);
+            .atZone(zoneId)
+            .format(dateFormatter);
 
         String time = event.getStartTime()
-                .atZone(ZoneId.systemDefault())
-                .format(timeFormatter);
+            .atZone(zoneId)
+            .format(timeFormatter);
 
         StringBuilder sb = new StringBuilder();
 
@@ -191,6 +220,90 @@ public class MemberService {
         """);
 
         return sb.toString();
+    }
+
+    private ZoneId resolveEventZone(Event event) {
+        String timezone = Optional.ofNullable(event.getCalendar())
+                .map(com.flux.calendar_service.calendar.Calendar::getTimezone)
+                .filter(tz -> !tz.isBlank())
+                .orElse("UTC");
+        return ZoneId.of(timezone);
+    }
+
+    private String resolveOrganizerEmail(Event event) {
+        return event.getMembers().stream()
+                .filter(Member::isOwner)
+                .map(Member::getEmail)
+                .filter(email -> email != null && !email.isBlank())
+                .findFirst()
+                .orElse(senderEmail);
+    }
+
+    private String resolveOrganizerName(Event event) {
+        return event.getMembers().stream()
+                .filter(Member::isOwner)
+                .map(Member::getFullName)
+                .filter(name -> name != null && !name.isBlank())
+                .findFirst()
+                .orElse("Flux Calendar");
+    }
+
+    private int resolveSequence(Event event) {
+        Instant source = event.getUpdatedAt() != null ? event.getUpdatedAt() : event.getCreatedAt();
+        if (source == null) {
+            return 0;
+        }
+        return (int) Math.floorMod(source.getEpochSecond(), Integer.MAX_VALUE);
+    }
+
+    private void appendIcsLine(StringBuilder builder, String line) {
+        builder.append(foldIcsLine(line)).append("\r\n");
+    }
+
+    private String foldIcsLine(String line) {
+        int maxLength = 75;
+        if (line.length() <= maxLength) {
+            return line;
+        }
+
+        StringBuilder folded = new StringBuilder();
+        int index = 0;
+        while (index < line.length()) {
+            int end = Math.min(index + maxLength, line.length());
+            if (index > 0) {
+                folded.append("\r\n ");
+            }
+            folded.append(line, index, end);
+            index = end;
+        }
+        return folded.toString();
+    }
+
+    private String escapeIcsText(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .replace("\\", "\\\\")
+                .replace(";", "\\;")
+                .replace(",", "\\,")
+                .replace("\r\n", "\\n")
+                .replace("\n", "\\n")
+                .replace("\r", "\\n");
+    }
+
+    private String escapeIcsParam(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace(";", "\\;")
+                .replace(",", "\\,")
+                .replace(":", "\\:");
     }
 
     public String addMember(String eventId, String email, MemberRequest request) {
