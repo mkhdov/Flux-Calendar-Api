@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.cache.annotation.CacheEvict;
 
 @Service
 @RequiredArgsConstructor
@@ -34,6 +35,7 @@ public class AttachmentService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public AttachmentResponse uploadAttachment(String eventId, org.springframework.web.multipart.MultipartFile file) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
@@ -54,6 +56,7 @@ public class AttachmentService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public void deleteAttachment(String attachmentId) {
         Attachment attachment = attachmentRepository.findById(attachmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Attachment not found with ID: " + attachmentId));

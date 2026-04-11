@@ -19,27 +19,27 @@ spring:
           lower-case-service-id: true
       routes:
         - id: user-management-service-swagger
-          uri: lb://USER-MANAGEMENT-SERVICE
+          uri: http://user-management-service:8081
           predicates:
             - Path=/user-management/v3/api-docs/**, /user-management/swagger-ui/**, /user-management/swagger-ui.html
           filters:
             - StripPrefix=1
         - id: calendars-service-swagger
-          uri: lb://CALENDARS-SERVICE
+          uri: http://calendar-service:8083
           predicates:
             - Path=/calendars/v3/api-docs/**, /calendars/swagger-ui/**, /calendars/swagger-ui.html
           filters:
             - StripPrefix=1
         - id: user-management-service
-          uri: lb://USER-MANAGEMENT-SERVICE
+          uri: http://user-management-service:8081
           predicates:
             - Path=/users/**, /api/auth/**, /login, /api/users/login/**, /oauth2/**
           filters:
             - StripPrefix=0
         - id: calendars-service
-          uri: lb://CALENDARS-SERVICE
+          uri: http://calendar-service:8083
           predicates:
-            - Path=/calendars/**, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /api/tasks/**, /api/users/login/**, /zoom/**, /subtasks/**, /notes/**, /members/**
+            - Path=/calendars/**, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /tasks/**, /api/users/login/**, /zoom/**, /subtasks/**, /notes/**, /members/**
           filters:
             - StripPrefix=0
 

@@ -16,9 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
+
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
@@ -34,233 +32,236 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class EventServiceTest {
 
-    @Mock
-    private EventRepository eventRepository;
-    @Mock
-    private EventMapper eventMapper;
-    @Mock
-    private CalendarRepository calendarRepository;
-    @Mock
-    private LocationRepository locationRepository;
-    @Mock
-    private LocationMapper locationMapper;
-    @Mock
-    private ConferenceRepository conferenceRepository;
-    @Mock
-    private ConferenceMapper conferenceMapper;
-    @Mock
-    private MemberRepository memberRepository;
-    @Mock
-    private GoogleCalendarApiService googleCalendarApiService;
-    @Mock
-    private com.flux.calendar_service.subtask.SubtaskRepository subtaskRepository;
-    @Mock
-    private com.flux.calendar_service.attachment.AttachmentRepository attachmentRepository;
-    @Mock
-    private com.flux.calendar_service.note.NoteRepository noteRepository;
-    @Mock
-    private EventRangeValidator rangeValidator;
+        @Mock
+        private EventRepository eventRepository;
+        @Mock
+        private EventMapper eventMapper;
+        @Mock
+        private CalendarRepository calendarRepository;
+        @Mock
+        private LocationRepository locationRepository;
+        @Mock
+        private LocationMapper locationMapper;
+        @Mock
+        private ConferenceRepository conferenceRepository;
+        @Mock
+        private ConferenceMapper conferenceMapper;
+        @Mock
+        private MemberRepository memberRepository;
+        @Mock
+        private GoogleCalendarApiService googleCalendarApiService;
+        @Mock
+        private com.flux.calendar_service.subtask.SubtaskRepository subtaskRepository;
+        @Mock
+        private com.flux.calendar_service.attachment.AttachmentRepository attachmentRepository;
+        @Mock
+        private com.flux.calendar_service.note.NoteRepository noteRepository;
+        @Mock
+        private EventRangeValidator rangeValidator;
 
-    @InjectMocks
-    private EventService eventService;
+        @InjectMocks
+        private EventService eventService;
 
-    @Test
-    void createEvent_ShouldReturnId() {
-        String calendarId = "cal1";
-        Instant now = Instant.now();
-        EventRequest request = new EventRequest(
-                "New Event", "Description", "#000000", EventType.MEETING, null,
-                now, now.plusSeconds(3600), false, EventStatus.NOTSTARTED,
-                Collections.emptyList(), Collections.emptyList(), null);
-        Calendar calendar = new Calendar();
-        calendar.setId("cal1");
-        calendar.setUserId("user1");
+        @Test
+        void createEvent_ShouldReturnId() {
+                String calendarId = "cal1";
+                Instant now = Instant.now();
+                EventRequest request = new EventRequest(
+                                "New Event", "Description", "#000000", EventType.MEETING, null,
+                                now, now.plusSeconds(3600), false, EventStatus.NOTSTARTED,
+                                Collections.emptyList(), Collections.emptyList(), null);
+                Calendar calendar = new Calendar();
+                calendar.setId("cal1");
+                calendar.setUserId("user1");
 
-        Event event = new Event();
-        event.setId("event1");
-        event.setStartTime(request.startTime());
-        event.setEndTime(request.endTime());
-        event.setTitle(request.title());
-        event.setDescription(request.description());
-        event.setType(EventType.MEETING);
+                Event event = new Event();
+                event.setId("event1");
+                event.setStartTime(request.startTime());
+                event.setEndTime(request.endTime());
+                event.setTitle(request.title());
+                event.setDescription(request.description());
+                event.setType(EventType.MEETING);
 
-        when(calendarRepository.findById(calendarId)).thenReturn(Optional.of(calendar));
-        when(eventMapper.toEvent(request, calendar)).thenReturn(event);
-        when(eventRepository.save(event)).thenReturn(event);
+                when(calendarRepository.findById(calendarId)).thenReturn(Optional.of(calendar));
+                when(eventMapper.toEvent(request, calendar)).thenReturn(event);
+                when(eventRepository.save(event)).thenReturn(event);
 
-        String id = eventService.createEvent(calendarId, request);
+                String id = eventService.createEvent(calendarId, request);
 
-        assertEquals("event1", id);
-        verify(memberRepository).save(any());
-    }
+                assertEquals("event1", id);
+                verify(memberRepository).save(any());
+        }
 
-    @Test
-    void getEventsByCalendarId_ShouldReturnList() {
-        String calendarId = "cal1";
-        Instant now = Instant.now();
-        Calendar calendar = new Calendar();
-        Event event = new Event();
-        EventResponse response = new EventResponse(
-                "1", null, "Event 1", "Desc", "#000", null, null,
-                EventType.MEETING, now, now.plusSeconds(3600),
-                false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
-                Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
-                Collections.emptyList(),
-                now, now);
+        @Test
+        void getEventsByCalendarId_ShouldReturnList() {
+                String calendarId = "cal1";
+                Instant now = Instant.now();
+                Calendar calendar = new Calendar();
+                Event event = new Event();
+                EventResponse response = new EventResponse(
+                                "1", null, "Event 1", "Desc", "#000", null, null,
+                                EventType.MEETING, now, now.plusSeconds(3600),
+                                false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
+                                Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
+                                Collections.emptyList(),
+                                now, now);
 
-        when(calendarRepository.findById(calendarId)).thenReturn(Optional.of(calendar));
-        when(eventRepository.findByCalendarId(calendarId)).thenReturn(List.of(event));
-        when(eventMapper.toEventResponse(event)).thenReturn(response);
+                when(calendarRepository.findById(calendarId)).thenReturn(Optional.of(calendar));
+                when(eventRepository.findByCalendarId(calendarId)).thenReturn(List.of(event));
+                when(eventMapper.toEventResponse(event)).thenReturn(response);
 
-        List<EventResponse> results = eventService.getEventsByCalendarId(calendarId);
+                List<EventResponse> results = eventService.getEventsByCalendarId(calendarId);
 
-        assertEquals(1, results.size());
-        assertEquals("1", results.get(0).id());
-    }
+                assertEquals(1, results.size());
+                assertEquals("1", results.get(0).id());
+        }
 
-    @Test
-    void getEventById_ShouldReturnEvent() {
-        String id = "1";
-        Instant now = Instant.now();
-        Event event = new Event();
-        EventResponse response = new EventResponse(
-                "1", null, "Event 1", "Desc", "#000", null, null,
-                EventType.MEETING, now, now.plusSeconds(3600),
-                false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
-                Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
-                Collections.emptyList(),
-                now, now);
+        @Test
+        void getEventById_ShouldReturnEvent() {
+                String id = "1";
+                Instant now = Instant.now();
+                Event event = new Event();
+                EventResponse response = new EventResponse(
+                                "1", null, "Event 1", "Desc", "#000", null, null,
+                                EventType.MEETING, now, now.plusSeconds(3600),
+                                false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
+                                Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
+                                Collections.emptyList(),
+                                now, now);
 
-        when(eventRepository.findById(id)).thenReturn(Optional.of(event));
-        when(eventMapper.toEventResponse(event)).thenReturn(response);
+                when(eventRepository.findById(id)).thenReturn(Optional.of(event));
+                when(eventMapper.toEventResponse(event)).thenReturn(response);
 
-        EventResponse result = eventService.getEventById(id);
+                EventResponse result = eventService.getEventById(id);
 
-        assertNotNull(result);
-        assertEquals("1", result.id());
-    }
+                assertNotNull(result);
+                assertEquals("1", result.id());
+        }
 
-    @Test
-    void getEventsByMonth_ShouldReturnList() {
-        String calendarId = "cal1";
-        int year = 2023;
-        int month = 10;
-        Instant now = Instant.now();
-        Event event = new Event();
-        event.setId("1");
-        
-        EventMonthResponse response = new EventMonthResponse(
-                "1", "Event 1", "#000", now, now.plusSeconds(3600));
+        @Test
+        void getEventsByMonth_ShouldReturnList() {
+                String calendarId = "cal1";
+                int year = 2023;
+                int month = 10;
+                Instant now = Instant.now();
+                Event event = new Event();
+                event.setId("1");
 
-        when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class), any(Instant.class)))
-            .thenReturn(List.of(event));
-        when(subtaskRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
-        when(attachmentRepository.findByEventIdIn(anyList())).thenReturn(Collections.emptyList());
-        when(memberRepository.findAllMembersByEventIdIn(anyList())).thenReturn(Collections.emptyList());
-        when(noteRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
-        when(eventMapper.toEventMonthResponse(event)).thenReturn(response);
+                EventMonthResponse response = new EventMonthResponse(
+                                "1", "Event 1", "#000", now, now.plusSeconds(3600));
 
-        List<EventMonthResponse> results = eventService.getEventsByMonth(calendarId, year, month);
+                when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class),
+                                any(Instant.class)))
+                                .thenReturn(List.of(event));
+                when(subtaskRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+                when(attachmentRepository.findByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+                when(memberRepository.findAllMembersByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+                when(noteRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+                when(eventMapper.toEventMonthResponse(event)).thenReturn(response);
 
-        assertEquals(1, results.size());
-        assertEquals("1", results.get(0).id());
-    }
+                List<EventMonthResponse> results = eventService.getEventsByMonth(calendarId, year, month);
 
-    // ── Range validation tests ──────────────────────────────────
+                assertEquals(1, results.size());
+                assertEquals("1", results.get(0).id());
+        }
 
-    @Test
-    void getEventsByDateRange_DelegatesToRangeValidator() {
-        Instant start = Instant.now();
-        Instant end = start.plus(3, ChronoUnit.DAYS);
+        // ── Range validation tests ──────────────────────────────────
 
-        when(eventRepository.findEventsByRangeFiltered(eq("cal1"), any(), any()))
-                .thenReturn(Collections.emptyList());
+        @Test
+        void getEventsByDateRange_DelegatesToRangeValidator() {
+                Instant start = Instant.now();
+                Instant end = start.plus(3, ChronoUnit.DAYS);
 
-        eventService.getEventsByDateRange("cal1", start, end);
+                when(eventRepository.findRangeEventsWithCoreRelations(eq("cal1"), any(), any()))
+                                .thenReturn(Collections.emptyList());
 
-        verify(rangeValidator).validate(ViewType.WEEK, start, end);
-    }
+                eventService.getEventsByDateRange("cal1", start, end);
 
-    @Test
-    void getEventsByDateRange_ExceedingSevenDays_ShouldThrowBadRequest() {
-        Instant start = Instant.now();
-        Instant end = start.plus(10, ChronoUnit.DAYS);
+                verify(rangeValidator).validate(ViewType.WEEK, start, end);
+        }
 
-        doThrow(new ResponseStatusException(
-                org.springframework.http.HttpStatus.BAD_REQUEST, "Week view supports max 7 days"))
-                .when(rangeValidator).validate(ViewType.WEEK, start, end);
+        @Test
+        void getEventsByDateRange_ExceedingSevenDays_ShouldThrowBadRequest() {
+                Instant start = Instant.now();
+                Instant end = start.plus(10, ChronoUnit.DAYS);
 
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
-                eventService.getEventsByDateRange("cal1", start, end));
+                doThrow(new ResponseStatusException(
+                                org.springframework.http.HttpStatus.BAD_REQUEST, "Week view supports max 7 days"))
+                                .when(rangeValidator).validate(ViewType.WEEK, start, end);
 
-        assertEquals(400, ex.getStatusCode().value());
-        assertTrue(ex.getReason().contains("Week view supports max 7 days"));
-    }
+                ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                                () -> eventService.getEventsByDateRange("cal1", start, end));
 
-    @Test
-    void getEventsByDateRange_ZeroDayRange_ShouldThrowBadRequest() {
-        Instant start = Instant.now();
-        Instant end = start.plusSeconds(30);
+                assertEquals(400, ex.getStatusCode().value());
+                assertTrue(ex.getReason().contains("Week view supports max 7 days"));
+        }
 
-        doThrow(new ResponseStatusException(
-                org.springframework.http.HttpStatus.BAD_REQUEST, "Invalid date range: must span at least 1 day"))
-                .when(rangeValidator).validate(ViewType.WEEK, start, end);
+        @Test
+        void getEventsByDateRange_ZeroDayRange_ShouldThrowBadRequest() {
+                Instant start = Instant.now();
+                Instant end = start.plusSeconds(30);
 
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
-                eventService.getEventsByDateRange("cal1", start, end));
+                doThrow(new ResponseStatusException(
+                                org.springframework.http.HttpStatus.BAD_REQUEST,
+                                "Invalid date range: must span at least 1 day"))
+                                .when(rangeValidator).validate(ViewType.WEEK, start, end);
 
-        assertEquals(400, ex.getStatusCode().value());
-        assertTrue(ex.getReason().contains("Invalid date range"));
-    }
+                ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                                () -> eventService.getEventsByDateRange("cal1", start, end));
 
-    // ── Month validation tests ──────────────────────────────────
+                assertEquals(400, ex.getStatusCode().value());
+                assertTrue(ex.getReason().contains("Invalid date range"));
+        }
 
-    @Test
-    void getEventsByMonth_DelegatesToRangeValidator() {
-        String calendarId = "cal1";
-        Event event = new Event();
-        event.setId("1");
-        Instant now = Instant.now();
-        EventMonthResponse response = new EventMonthResponse(
-                "1", "Event 1", "#000", now, now.plusSeconds(3600));
+        // ── Month validation tests ──────────────────────────────────
 
-        when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class), any(Instant.class)))
-                .thenReturn(List.of(event));
-        when(subtaskRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
-        when(attachmentRepository.findByEventIdIn(anyList())).thenReturn(Collections.emptyList());
-        when(memberRepository.findAllMembersByEventIdIn(anyList())).thenReturn(Collections.emptyList());
-        when(noteRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
-        when(eventMapper.toEventMonthResponse(event)).thenReturn(response);
+        @Test
+        void getEventsByMonth_DelegatesToRangeValidator() {
+                String calendarId = "cal1";
+                Event event = new Event();
+                event.setId("1");
+                Instant now = Instant.now();
+                EventMonthResponse response = new EventMonthResponse(
+                                "1", "Event 1", "#000", now, now.plusSeconds(3600));
 
-        eventService.getEventsByMonth(calendarId, 2023, 10);
+                when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class),
+                                any(Instant.class)))
+                                .thenReturn(List.of(event));
+                when(subtaskRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+                when(attachmentRepository.findByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+                when(memberRepository.findAllMembersByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+                when(noteRepository.findAllByEventIdIn(anyList())).thenReturn(Collections.emptyList());
+                when(eventMapper.toEventMonthResponse(event)).thenReturn(response);
 
-        verify(rangeValidator).validate(eq(ViewType.MONTH), any(Instant.class), any(Instant.class));
-    }
+                eventService.getEventsByMonth(calendarId, 2023, 10);
 
-    @Test
-    void getEventsByMonth_WithInvalidMonth_ShouldThrowBadRequest() {
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
-                eventService.getEventsByMonth("cal1", 2023, 13));
+                verify(rangeValidator).validate(eq(ViewType.MONTH), any(Instant.class), any(Instant.class));
+        }
 
-        assertEquals(400, ex.getStatusCode().value());
-        assertTrue(ex.getReason().contains("Month must be between 1 and 12"));
-    }
+        @Test
+        void getEventsByMonth_WithInvalidMonth_ShouldThrowBadRequest() {
+                ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                                () -> eventService.getEventsByMonth("cal1", 2023, 13));
 
-    @Test
-    void getEventsByMonth_WithZeroMonth_ShouldThrowBadRequest() {
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
-                eventService.getEventsByMonth("cal1", 2023, 0));
+                assertEquals(400, ex.getStatusCode().value());
+                assertTrue(ex.getReason().contains("Month must be between 1 and 12"));
+        }
 
-        assertEquals(400, ex.getStatusCode().value());
-        assertTrue(ex.getReason().contains("Month must be between 1 and 12"));
-    }
+        @Test
+        void getEventsByMonth_WithZeroMonth_ShouldThrowBadRequest() {
+                ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                                () -> eventService.getEventsByMonth("cal1", 2023, 0));
 
-    @Test
-    void getEventsByMonth_WithInvalidYear_ShouldThrowBadRequest() {
-        ResponseStatusException ex = assertThrows(ResponseStatusException.class, () ->
-                eventService.getEventsByMonth("cal1", -1, 6));
+                assertEquals(400, ex.getStatusCode().value());
+                assertTrue(ex.getReason().contains("Month must be between 1 and 12"));
+        }
 
-        assertEquals(400, ex.getStatusCode().value());
-        assertTrue(ex.getReason().contains("Year must be between 1 and 9999"));
-    }
+        @Test
+        void getEventsByMonth_WithInvalidYear_ShouldThrowBadRequest() {
+                ResponseStatusException ex = assertThrows(ResponseStatusException.class,
+                                () -> eventService.getEventsByMonth("cal1", -1, 6));
+
+                assertEquals(400, ex.getStatusCode().value());
+                assertTrue(ex.getReason().contains("Year must be between 1 and 9999"));
+        }
 }

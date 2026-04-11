@@ -53,7 +53,6 @@ public class Attachment {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "event_id", nullable = false)
-    @lombok.EqualsAndHashCode.Exclude
     @lombok.ToString.Exclude
     private Event event;
 

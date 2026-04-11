@@ -83,28 +83,7 @@ public class EventMapper {
         );
     }
 
-    public com.flux.calendar_service.event.dto.EventRangeResponse toEventRangeResponse(com.flux.calendar_service.event.dto.EventRangeProjection projection) {
-        if (projection == null) {
-            return null;
-        }
 
-        return new com.flux.calendar_service.event.dto.EventRangeResponse(
-                projection.getId(),
-                projection.getCalendarId(),
-                projection.getTitle(),
-                projection.getColorHex(),
-                projection.getStartTime(),
-                projection.getEndTime(),
-                projection.isAllDay(),
-                projection.getStatus(),
-                projection.getHasLocation(),
-                projection.getHasConference(),
-                projection.getHasAttachment(),
-                projection.getHasSubtasks(),
-                projection.getHasMember(),
-                projection.getHasNotes()
-        );
-    }
 
     public Event toEvent(EventRequest request, Calendar calendar) {
         if (request == null) {

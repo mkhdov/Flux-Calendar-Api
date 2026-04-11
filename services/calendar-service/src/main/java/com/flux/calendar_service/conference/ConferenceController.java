@@ -1,5 +1,6 @@
 package com.flux.calendar_service.conference;
 
+import com.flux.calendar_service.conference.dto.ConferenceResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;

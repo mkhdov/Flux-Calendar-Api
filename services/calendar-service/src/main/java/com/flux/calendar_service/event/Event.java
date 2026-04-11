@@ -12,6 +12,7 @@ import com.flux.calendar_service.member.Member;
 import com.flux.calendar_service.note.Note;
 import com.flux.calendar_service.subtask.Subtask;
 
+import org.hibernate.annotations.BatchSize;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -27,6 +28,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
+
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
@@ -72,23 +74,27 @@ public class Event {
     @Column(name = "color_hex", nullable = false)
     private String colorHex;
 
+    @BatchSize(size = 50)
     @Builder.Default
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private Set<Subtask> subtasks = new HashSet<>();
 
+    @BatchSize(size = 50)
     @Builder.Default
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private Set<Attachment> attachments = new HashSet<>();
 
+    @BatchSize(size = 50)
     @Builder.Default
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private Set<Member> members = new HashSet<>();
 
+    @BatchSize(size = 50)
     @Builder.Default
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     private Set<Note> notes = new HashSet<>();
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "location_id")
     private Location location;
 
@@ -115,6 +121,7 @@ public class Event {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "sync_status")
+    @Builder.Default
     private SyncStatus syncStatus = SyncStatus.SYNCED;
 
     @Column(name = "status", nullable = false)

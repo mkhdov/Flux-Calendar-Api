@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.cache.annotation.CacheEvict;
 
 @Service
 @RequiredArgsConstructor
@@ -20,6 +21,7 @@ public class SubtaskService {
     private final SubtaskMapper subtaskMapper;
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public String createSubtask(String eventId, String subtaskDescription) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
@@ -52,6 +54,7 @@ public class SubtaskService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public void completeSubtask(String id) {
         Subtask subtask = subtaskRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Subtask not found with ID: " + id));
@@ -60,6 +63,7 @@ public class SubtaskService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public void incompleteSubtask(String id) {
         Subtask subtask = subtaskRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Subtask not found with ID: " + id));
@@ -68,6 +72,7 @@ public class SubtaskService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public SubtaskResponse updateSubtask(String id, SubtaskRequest request) {
         Subtask subtask = subtaskRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Subtask not found with ID: " + id));
@@ -79,6 +84,7 @@ public class SubtaskService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month"}, allEntries = true)
     public void deleteSubtask(String id) {
         Subtask subtask = subtaskRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Subtask not found with ID: " + id));

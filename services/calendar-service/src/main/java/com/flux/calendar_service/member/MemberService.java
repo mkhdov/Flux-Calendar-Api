@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.transaction.annotation.Transactional;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -306,6 +308,8 @@ public class MemberService {
                 .replace(":", "\\:");
     }
 
+    @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public String addMember(String eventId, String email, MemberRequest request) {
         Event event = eventService.getEventByIdTypeEvent(eventId);
         Member member = Member.builder()
@@ -329,6 +333,8 @@ public class MemberService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month"}, allEntries = true)
     public void deleteMember(String memberId, String currentMemberId) {
         if(isItOwner(currentMemberId)) {
             Member member = memberRepository.findMemberById(memberId)

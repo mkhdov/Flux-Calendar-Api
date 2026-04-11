@@ -80,9 +80,11 @@ public class Calendar {
     @Column(name = "google_calendar_id")
     private String googleCalendarId;
 
+    @Builder.Default
     @OneToMany(mappedBy = "calendar", cascade = CascadeType.ALL)
     private List<Event> events = new ArrayList<>();
 
+    @Builder.Default
     @OneToMany(mappedBy = "calendar", cascade = CascadeType.ALL)
     private List<Task> tasks = new ArrayList<>();
 }

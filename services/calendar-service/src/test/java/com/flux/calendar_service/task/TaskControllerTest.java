@@ -51,7 +51,7 @@ class TaskControllerTest {
 
         when(taskService.createTask(any(TaskRequest.class))).thenReturn(response);
 
-        mockMvc.perform(post("/api/tasks")
+        mockMvc.perform(post("/tasks")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
@@ -68,7 +68,7 @@ class TaskControllerTest {
 
         when(taskService.getTask("1")).thenReturn(response);
 
-        mockMvc.perform(get("/api/tasks/1"))
+        mockMvc.perform(get("/tasks/1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value("1"))
                 .andExpect(jsonPath("$.title").value("Existing Task"));
@@ -83,7 +83,7 @@ class TaskControllerTest {
 
         when(taskService.getAllTasks("cal1")).thenReturn(List.of(response));
 
-        mockMvc.perform(get("/api/tasks")
+        mockMvc.perform(get("/tasks")
                 .param("calendarId", "cal1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value("1"))
@@ -103,7 +103,7 @@ class TaskControllerTest {
 
         when(taskService.updateTask(eq("1"), any(TaskUpdateRequest.class))).thenReturn(response);
 
-        mockMvc.perform(patch("/api/tasks/1")
+        mockMvc.perform(patch("/tasks/1")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isOk())
@@ -114,7 +114,7 @@ class TaskControllerTest {
     void deleteTask_ShouldReturnNoContent() throws Exception {
         doNothing().when(taskService).deleteTask("1");
 
-        mockMvc.perform(delete("/api/tasks/1"))
+        mockMvc.perform(delete("/tasks/1"))
                 .andExpect(status().isNoContent());
     }
 }

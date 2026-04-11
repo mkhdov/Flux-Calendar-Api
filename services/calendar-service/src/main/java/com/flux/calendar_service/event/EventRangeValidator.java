@@ -16,8 +16,7 @@ public class EventRangeValidator {
         if (days <= 0) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "Invalid date range: must span at least 1 day"
-            );
+                    "Invalid date range: must span at least 1 day");
         }
 
         switch (view) {
@@ -25,16 +24,14 @@ public class EventRangeValidator {
                 if (days > 7) {
                     throw new ResponseStatusException(
                             HttpStatus.BAD_REQUEST,
-                            "Week view supports max 7 days"
-                    );
+                            "Week view supports max 7 days");
                 }
             }
             case MONTH -> {
                 if (days > 31) {
                     throw new ResponseStatusException(
                             HttpStatus.BAD_REQUEST,
-                            "Month view supports max 31 days"
-                    );
+                            "Month view supports max 31 days");
                 }
             }
         }

@@ -82,7 +82,7 @@ public class EventController {
     @Operation(summary = "Get events by date range", description = "Retrieves events within a specific time range for a given calendar")
     @ApiResponse(responseCode = "200", description = "List of events in the range (may be empty)")
     @GetMapping("/range")
-    public ResponseEntity<List<com.flux.calendar_service.event.dto.EventRangeResponse>> getEventsByDateRange(
+    public ResponseEntity<List<EventResponse>> getEventsByDateRange(
             @Parameter(description = "Calendar ID") @RequestParam String calendarId,
             @Parameter(description = "Start time (ISO format; timezone-less values are treated as UTC)") @RequestParam Instant start,
             @Parameter(description = "End time (ISO format; timezone-less values are treated as UTC)") @RequestParam Instant end) {

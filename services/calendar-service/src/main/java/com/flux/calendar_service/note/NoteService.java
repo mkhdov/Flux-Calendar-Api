@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import org.springframework.cache.annotation.CacheEvict;
 
 @Service
 @RequiredArgsConstructor
@@ -22,6 +23,7 @@ public class NoteService {
     private final NoteMapper noteMapper;
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public NoteResponse createNoteForEvent(String eventId, NoteRequest request) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
@@ -66,6 +68,7 @@ public class NoteService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public NoteResponse updateNote(String id, NoteRequest request) {
         Note note = noteRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Note not found with ID: " + id));
@@ -74,6 +77,7 @@ public class NoteService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public void deleteNote(String id) {
         Note note = noteRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Note not found with ID: " + id));

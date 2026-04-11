@@ -59,9 +59,15 @@ class EventControllerTest {
         @Test
         void getEventsByDateRange_ShouldReturnList() throws Exception {
                 Instant now = Instant.now();
-                com.flux.calendar_service.event.dto.EventRangeResponse response = new com.flux.calendar_service.event.dto.EventRangeResponse(
-                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600),
-                                false, EventStatus.NOTSTARTED, false, false, false, false, false, false);
+
+                EventResponse response = new EventResponse(
+                        "1", null, "Event 1", "Desc", "#000", null, null,
+                        EventType.MEETING, now, now.plusSeconds(3600),
+                        false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
+                        Collections.emptyList(),
+                        now, now
+                );
 
                 when(eventService.getEventsByDateRange(any(), any(), any())).thenReturn(List.of(response));
 

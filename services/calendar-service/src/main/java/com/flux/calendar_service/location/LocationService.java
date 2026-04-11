@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.cache.annotation.CacheEvict;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +30,7 @@ public class LocationService {
     private final GoogleCalendarApiService googleCalendarApiService;
 
     @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public String addLocation(String eventId, LocationRequest request) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found!"));
@@ -57,6 +59,8 @@ public class LocationService {
         return newLocation.getId();
     }
 
+    @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public Location create(String eventId, LocationRequest request) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found!"));
@@ -115,6 +119,8 @@ public class LocationService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month", "events:detail"}, allEntries = true)
     public void updateLocation(String id, UpdateLocation location) {
         Location location1 = locationRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Location not found!"));
@@ -122,9 +128,14 @@ public class LocationService {
         mergeLocation(location1, location);
         Location newLocation = locationRepository.save(location1);
 
-        Event event = eventRepository.findEventByLocationId(location1.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Event not found!"));
-        googleCalendarSync(newLocation, event);
+        List<Event> events = eventRepository.findEventByLocationId(location1.getId());
+        if (events.isEmpty()) {
+            log.warn("No events found for location ID: {}", location1.getId());
+        }
+
+        for (Event event : events) {
+            googleCalendarSync(newLocation, event);
+        }
 
     }
 
@@ -180,17 +191,19 @@ public class LocationService {
         }
     }
 
+    @Transactional
+    @CacheEvict(cacheNames = {"events:by-range", "events:month"}, allEntries = true)
     public void deleteLocation(String id) {
         Location location = locationRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Location not found!"));
 
-        Event event = eventRepository.findEventByLocationId(location.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Event not found!"));
-
-        event.setLocation(null);
-        eventRepository.save(event);
+        List<Event> events = eventRepository.findEventByLocationId(location.getId());
+        for (Event event : events) {
+            event.setLocation(null);
+            eventRepository.save(event);
+            googleCalendarSync(null, event);
+        }
         locationRepository.delete(location);
-        googleCalendarSync(null, event);
     }
 
 }

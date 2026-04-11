@@ -44,13 +44,11 @@ public class Note {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "event_id")
-    @lombok.EqualsAndHashCode.Exclude
     @lombok.ToString.Exclude
     private Event event;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "task_id")
-    @lombok.EqualsAndHashCode.Exclude
     @lombok.ToString.Exclude
     private Task task;
 

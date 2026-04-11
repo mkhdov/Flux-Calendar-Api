@@ -1,7 +1,6 @@
 package com.flux.calendar_service.location;
 
-import java.util.HashSet;
-import java.util.Set;
+
 
 import com.flux.calendar_service.event.Event;
 
@@ -13,7 +12,7 @@ import jakarta.persistence.EntityListeners;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -67,6 +66,4 @@ public class Location {
     @Column(name = "place_id")
     private String placeId;
 
-    @OneToMany(mappedBy = "location")
-    private Set<Event> events = new HashSet<>();
 }

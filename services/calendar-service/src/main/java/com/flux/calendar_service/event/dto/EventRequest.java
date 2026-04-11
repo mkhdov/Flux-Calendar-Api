@@ -27,5 +27,6 @@ public record EventRequest(
         @Schema(description = "Current status of the event") EventStatus status,
         @Schema(description = "List of subtasks associated with the event") java.util.List<com.flux.calendar_service.subtask.dto.SubtaskRequest> subtasks,
         @Schema(description = "List of attachments associated with the event") java.util.List<com.flux.calendar_service.attachment.dto.AttachmentRequest> attachments,
-        @Schema(description = "Location associated with event") LocationRequest location) {
+        @Schema(description = "Location associated with event") LocationRequest location,
+        @Schema(description = "Planner mode") PlannerRequest planner) {
 }
