@@ -17,6 +17,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flux.notification_service.exception.DuplicateReminderException;
 import com.flux.notification_service.exception.ReminderNotFoundException;
 import com.flux.notification_service.reminder.dto.ReminderRequest;
@@ -30,6 +31,9 @@ class ReminderServiceTest {
 
     @Mock
     private ReminderMapper reminderMapper;
+
+    @Mock
+    private ObjectMapper objectMapper;
 
     @InjectMocks
     private ReminderService reminderService;

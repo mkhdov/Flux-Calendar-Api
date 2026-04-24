@@ -1,6 +1,7 @@
 package com.flux.calendar_service.event;
 
 import com.flux.calendar_service.event.dto.EventRequest;
+import com.flux.calendar_service.event.dto.EventNotificationResponse;
 import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
 import io.swagger.v3.oas.annotations.Operation;
@@ -35,7 +36,7 @@ public class EventController {
             @ApiResponse(responseCode = "404", description = "Calendar not found")
     })
     @PostMapping("/calendar/{calendarId}")
-    public ResponseEntity<String> createEvent(
+    public ResponseEntity<List<String>> createEvent(
             @Parameter(description = "ID of the calendar to add the event to") @PathVariable String calendarId,
             @RequestBody @Valid EventRequest request) {
         return ResponseEntity
@@ -50,7 +51,7 @@ public class EventController {
             @ApiResponse(responseCode = "404", description = "Calendar not found")
     })
     @PostMapping("/calendar/{calendarId}/add-meet")
-    public ResponseEntity<String> createEventWithMeet(
+    public ResponseEntity<List<String>> createEventWithMeet(
             @Parameter(description = "ID of the calendar to add the event to") @PathVariable String calendarId,
             @RequestBody @Valid EventRequest request) {
         return ResponseEntity
@@ -66,7 +67,7 @@ public class EventController {
             @ApiResponse(responseCode = "401", description = "Zoom not connected")
     })
     @PostMapping("/calendar/{calendarId}/add-zoom")
-    public ResponseEntity<String> createEventWithZoom(
+    public ResponseEntity<List<String>> createEventWithZoom(
             @Parameter(description = "ID of the calendar to add the event to") @PathVariable String calendarId,
             @Parameter(description = "User ID from authentication", hidden = true) @RequestHeader(value = "X-User-Id") String userId,
             @RequestBody @Valid EventRequest request) {
@@ -121,6 +122,23 @@ public class EventController {
     }
 
     /**
+     * Lightweight event payload for reminders
+     * GET /events/{id}/notification
+     */
+    @Operation(summary = "Get lightweight event for notifications", description = "Returns a minimized event payload suitable for reminder email rendering (no attachments)")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Event found"),
+            @ApiResponse(responseCode = "404", description = "Event not found")
+    })
+    @GetMapping("/{id}/notification")
+    public ResponseEntity<EventNotificationResponse> getEventNotificationById(
+            @Parameter(description = "ID of the event to retrieve") @PathVariable String id) {
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(eventService.getEventNotificationById(id));
+    }
+
+    /**
      * Get all events for a specific calendar
      * GET /events/calendar/{calendarId}
      */
@@ -135,6 +153,24 @@ public class EventController {
         return ResponseEntity
                 .status(HttpStatus.OK)
                 .body(eventService.getEventsByCalendarId(calendarId));
+    }
+
+    /**
+     * Get all MEETING type events for a specific calendar
+     * GET /events/calendar/{calendarId}/meetings
+     */
+    @Operation(summary = "Get meetings by calendar", description = "Retrieves all events of type MEETING for a specific calendar, optionally filtered by tab (today/upcoming/past)")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "List of meetings (may be empty)"),
+            @ApiResponse(responseCode = "404", description = "Calendar not found")
+    })
+    @GetMapping("/calendar/{calendarId}/meetings")
+    public ResponseEntity<List<EventResponse>> getMeetingsByCalendar(
+            @Parameter(description = "ID of the calendar") @PathVariable String calendarId,
+            @Parameter(description = "Filter: today | upcoming | past | all (default: all)") @RequestParam(required = false, defaultValue = "all") String filter) {
+        return ResponseEntity
+                .status(HttpStatus.OK)
+                .body(eventService.getMeetingsByCalendarId(calendarId, filter));
     }
 
     /**

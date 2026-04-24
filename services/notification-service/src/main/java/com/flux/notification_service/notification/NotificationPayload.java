@@ -1,6 +1,7 @@
 package com.flux.notification_service.notification;
 
 import java.time.Instant;
+import java.util.List;
 
 import com.flux.notification_service.reminder.ReminderType;
 
@@ -24,5 +25,15 @@ public class NotificationPayload {
     private String eventDescription;
     private Instant triggerTime;
     private Instant eventStartTime;
+    private Instant eventEndTime;
+    private Boolean allDay;
+    private String eventLocation;
+    private String meetingType;
+    private String meetingUrl;
+    private String meetingCode;
+    private String dialInPhone;
+    private String dialInPin;
+    private String meetingPassword;
+    private List<NotificationSubtask> subtasks;
     private ReminderType type;
 }

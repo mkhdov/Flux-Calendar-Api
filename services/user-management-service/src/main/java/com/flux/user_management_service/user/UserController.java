@@ -1,5 +1,6 @@
 package com.flux.user_management_service.user;
 
+import java.util.Map;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +32,13 @@ public class UserController {
     @Operation(summary = "Get user by ID", description = "Retrieves a user by their unique ID")
     public ResponseEntity<UserResponse> getUserById(@PathVariable String id) {
         return ResponseEntity.status(HttpStatus.OK).body(userService.getUserById(id));
+    }
+
+    @GetMapping("/{id}/email")
+    @Operation(summary = "Get user email by ID", description = "Internal helper for other services to resolve an email by user ID")
+    public ResponseEntity<Map<String, String>> getUserEmailById(@PathVariable String id) {
+        UserResponse user = userService.getUserById(id);
+        return ResponseEntity.ok(Map.of("email", user.email()));
     }
 
     @PutMapping("/{id}")

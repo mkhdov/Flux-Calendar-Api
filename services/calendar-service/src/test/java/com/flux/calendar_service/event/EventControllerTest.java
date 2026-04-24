@@ -45,15 +45,15 @@ class EventControllerTest {
                 EventRequest request = new EventRequest(
                                 "New Event", "Description", "#000000", EventType.MEETING, null,
                                 now, now.plusSeconds(3600), false, EventStatus.NOTSTARTED,
-                                Collections.emptyList(), Collections.emptyList(), null);
+                                Collections.emptyList(), Collections.emptyList(), null, null, null);
 
-                when(eventService.createEvent(eq(calendarId), any(EventRequest.class))).thenReturn("event1");
+                when(eventService.createEvent(eq(calendarId), any(EventRequest.class))).thenReturn(List.of("event1"));
 
                 mockMvc.perform(post("/events/calendar/{calendarId}", calendarId)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request)))
                                 .andExpect(status().isCreated())
-                                .andExpect(content().string("event1"));
+                                .andExpect(jsonPath("$[0]").value("event1"));
         }
 
         @Test

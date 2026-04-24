@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     type            VARCHAR(20) NOT NULL,
     status          VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     retry_count     INT NOT NULL DEFAULT 0,
+    sent_at         TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

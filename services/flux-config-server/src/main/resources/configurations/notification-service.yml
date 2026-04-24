@@ -101,7 +101,8 @@ notification:
     ttl-hours: 24
 
 user-management-service:
-  url: http://user-management-service:8081
+  url: ${USER_MANAGEMENT_SERVICE_URL:http://user-management-service:${USER_MANAGEMENT_PORT:8081}}
 
 calendar-service:
-  url: http://calendars-service:8082
+  # Legacy fallback only (primary reminder rendering uses Kafka snapshots stored in DB)
+  url: ${CALENDAR_SERVICE_URL:http://calendar-service:${CALENDARS_PORT:8082}}

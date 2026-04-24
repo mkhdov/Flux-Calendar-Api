@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flux.notification_service.notification.NotificationPayload;
 import com.flux.notification_service.notification.NotificationSender;
 import com.flux.notification_service.notification.NotificationSenderFactory;
@@ -40,6 +42,7 @@ class ReminderProcessorTest {
     @Mock private NotificationSenderFactory senderFactory;
     @Mock private RedisTemplate<String, String> redisTemplate;
     @Mock private RestTemplate restTemplate;
+    @Mock private ObjectMapper objectMapper;
     @Mock private NotificationSender mockSender;
     @Mock private ValueOperations<String, String> valueOps;
 
@@ -51,6 +54,7 @@ class ReminderProcessorTest {
         ReflectionTestUtils.setField(reminderProcessor, "maxRetryAttempts", 3);
         ReflectionTestUtils.setField(reminderProcessor, "dedupTtlHours", 24L);
         ReflectionTestUtils.setField(reminderProcessor, "userServiceUrl", "http://localhost:8081");
+        ReflectionTestUtils.setField(reminderProcessor, "calendarServiceUrl", "http://localhost:8083");
     }
 
     @Test
@@ -85,6 +89,7 @@ class ReminderProcessorTest {
         Reminder reminder = buildReminder("rem-1", ReminderType.EMAIL);
 
         when(redisTemplate.hasKey("reminder:sent:rem-1")).thenReturn(true);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
         reminderProcessor.processOne(reminder);
 
@@ -121,6 +126,34 @@ class ReminderProcessorTest {
         assertThat(reminder.getRetryCount()).isEqualTo(3);
         assertThat(reminder.getStatus()).isEqualTo(ReminderStatus.FAILED);
         verify(reminderRepository).save(reminder);
+    }
+
+    @Test
+    void processOne_shouldResolveEmailFromEmailLookupEndpoint() throws Exception {
+        Reminder reminder = buildReminder("rem-1", ReminderType.EMAIL);
+
+        when(redisTemplate.hasKey("reminder:sent:rem-1")).thenReturn(false);
+        when(senderFactory.getSender(ReminderType.EMAIL)).thenReturn(mockSender);
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+
+        when(restTemplate.getForObject(
+                eq("http://localhost:8081/users/user-1/email"),
+                eq(java.util.Map.class)))
+                .thenReturn(Map.of("email", "user-1@flux.local"));
+
+        when(restTemplate.getForObject(
+                eq("http://localhost:8083/events/event-1/notification"),
+                eq(java.util.Map.class)))
+                .thenReturn(Map.of(
+                        "title", "Event Title",
+                        "startTime", Instant.parse("2026-04-01T10:00:00Z").toString()
+                ));
+
+        reminderProcessor.processOne(reminder);
+
+        ArgumentCaptor<NotificationPayload> captor = ArgumentCaptor.forClass(NotificationPayload.class);
+        verify(mockSender).send(captor.capture());
+        assertThat(captor.getValue().getUserEmail()).isEqualTo("user-1@flux.local");
     }
 
     private Reminder buildReminder(String id, ReminderType type) {

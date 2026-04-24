@@ -69,7 +69,7 @@ class EventServiceTest {
                 EventRequest request = new EventRequest(
                                 "New Event", "Description", "#000000", EventType.MEETING, null,
                                 now, now.plusSeconds(3600), false, EventStatus.NOTSTARTED,
-                                Collections.emptyList(), Collections.emptyList(), null);
+                                Collections.emptyList(), Collections.emptyList(), null, null, null);
                 Calendar calendar = new Calendar();
                 calendar.setId("cal1");
                 calendar.setUserId("user1");
@@ -86,9 +86,10 @@ class EventServiceTest {
                 when(eventMapper.toEvent(request, calendar)).thenReturn(event);
                 when(eventRepository.save(event)).thenReturn(event);
 
-                String id = eventService.createEvent(calendarId, request);
+                List<String> ids = eventService.createEvent(calendarId, request);
 
-                assertEquals("event1", id);
+                assertFalse(ids.isEmpty());
+                assertEquals("event1", ids.get(0));
                 verify(memberRepository).save(any());
         }
 

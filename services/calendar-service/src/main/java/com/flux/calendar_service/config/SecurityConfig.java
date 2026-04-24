@@ -32,6 +32,7 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
                                 "/auth/**",
+                                "/events/*/notification",
                                 "/zoom/connect/**",
                                 "/zoom/callback")
                         .permitAll()

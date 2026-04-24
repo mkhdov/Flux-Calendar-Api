@@ -1,17 +1,21 @@
 package com.flux.calendar_service.calendar;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 import com.flux.calendar_service.calendar.dto.CalendarRequest;
 import com.flux.calendar_service.calendar.dto.CalendarResponse;
 import com.flux.calendar_service.calendar.dto.CalendarUpdateRequest;
 import com.flux.calendar_service.calendar.dto.PrimaryRequest;
-import com.flux.calendar_service.exception.*;
-import lombok.RequiredArgsConstructor;
+import com.flux.calendar_service.exception.DuplicateResourceException;
+import com.flux.calendar_service.exception.EmptyFieldException;
+import com.flux.calendar_service.exception.ResourceNotFoundException;
+
 import org.apache.commons.lang.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -154,7 +158,8 @@ public class CalendarService {
         }
 
         calendarRepository.findByIdAndUserIdAndIsDeletedFalse(id, request.userId())
-                .orElseThrow(() -> new ResourceNotFoundException("The calendar with this id is not found in this user!"));
+                .orElseThrow(
+                        () -> new ResourceNotFoundException("The calendar with this id is not found in this user!"));
 
         calendarRepository.clearPrimaryByUserId(request.userId());
         calendarRepository.setPrimaryForUserCalendar(id, request.userId());

@@ -57,6 +57,7 @@ class SecurityConfig {
                                 "/oauth2/**",
                                 "/actuator/**",
                                 "/users/add",
+                                "/users/*/email",
                                 "/users/keycloak/**",
                                 "/users/sync",
                                 "/v3/api-docs/**",

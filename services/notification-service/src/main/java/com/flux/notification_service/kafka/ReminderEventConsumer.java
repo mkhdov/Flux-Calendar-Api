@@ -4,7 +4,6 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 import com.flux.notification_service.reminder.ReminderService;
-import com.flux.notification_service.reminder.dto.ReminderRequest;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +33,7 @@ public class ReminderEventConsumer {
                 case CREATE -> handleCreate(event);
                 case UPDATE -> handleUpdate(event);
                 case DELETE -> handleDelete(event);
+                case SNAPSHOT_UPDATE -> handleSnapshotUpdate(event);
             }
         } catch (Exception e) {
             log.error("Failed to process reminder event: eventId={}, action={}",
@@ -47,17 +47,8 @@ public class ReminderEventConsumer {
             return;
         }
 
-        var requests = event.getReminders().stream()
-                .map(detail -> new ReminderRequest(
-                        event.getEventId(),
-                        event.getUserId(),
-                        detail.getTriggerTime(),
-                        detail.getType()
-                ))
-                .toList();
-
-        reminderService.createReminders(requests);
-        log.info("Created {} reminder(s) for event {}", requests.size(), event.getEventId());
+        int created = reminderService.createRemindersFromEvent(event);
+        log.info("Created {} reminder(s) for event {}", created, event.getEventId());
     }
 
     private void handleUpdate(ReminderEvent event) {
@@ -70,5 +61,10 @@ public class ReminderEventConsumer {
     private void handleDelete(ReminderEvent event) {
         reminderService.cancelByEventId(event.getEventId());
         log.info("Cancelled reminders for deleted event {}", event.getEventId());
+    }
+
+    private void handleSnapshotUpdate(ReminderEvent event) {
+        int updated = reminderService.updateSnapshotForEvent(event);
+        log.info("Updated snapshot for {} reminder(s) of event {}", updated, event.getEventId());
     }
 }

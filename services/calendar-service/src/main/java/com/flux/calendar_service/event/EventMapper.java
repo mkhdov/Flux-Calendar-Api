@@ -9,6 +9,7 @@ import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.calendar.CalendarMapper;
 import com.flux.calendar_service.conference.ConferenceMapper;
 import com.flux.calendar_service.event.dto.EventRequest;
+import com.flux.calendar_service.event.dto.EventNotificationResponse;
 import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.event.dto.EventMonthResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
@@ -67,6 +68,32 @@ public class EventMapper {
                         : Collections.emptyList(),
                 event.getCreatedAt(),
                 event.getUpdatedAt());
+    }
+
+    public EventNotificationResponse toEventNotificationResponse(Event event, String joinUrl, String locationText) {
+        if (event == null) {
+            return null;
+        }
+
+        return new EventNotificationResponse(
+                event.getId(),
+                event.getTitle(),
+                event.getDescription(),
+                event.getStartTime(),
+                event.getEndTime(),
+                event.isAllDay(),
+                event.getType(),
+                event.getConference() != null ? event.getConference().getType() : null,
+                joinUrl,
+                event.getConference() != null ? event.getConference().getMeetingCode() : null,
+                event.getConference() != null ? event.getConference().getPhoneNumber() : null,
+                event.getConference() != null ? event.getConference().getPin() : null,
+                event.getConference() != null ? event.getConference().getConferencePassword() : null,
+                locationText,
+                event.getSubtasks() != null
+                        ? event.getSubtasks().stream().map(subtaskMapper::toSubtaskResponse).toList()
+                        : Collections.emptyList()
+        );
     }
 
     public EventMonthResponse toEventMonthResponse(Event event) {

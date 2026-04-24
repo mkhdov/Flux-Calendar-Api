@@ -1,8 +1,14 @@
 package com.flux.calendar_service.event;
 
 import java.io.IOException;
+import java.time.DayOfWeek;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -94,13 +100,17 @@ public class EventService {
 
     @Transactional
     @CacheEvict(cacheNames = { EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE }, allEntries = true)
-    public String createEvent(String calendarId, EventRequest request) {
+    public List<String> createEvent(String calendarId, EventRequest request) {
         if (calendarId == null || calendarId.isBlank()) {
             throw new EmptyFieldException("Calendar ID cannot be empty");
         }
 
         Calendar calendar = calendarRepository.findById(calendarId)
                 .orElseThrow(() -> new ResourceNotFoundException("Calendar not found with ID: " + calendarId));
+
+        if (request.planner() != null) {
+            return switchToPlannedMode(request, calendar);
+        }
 
         if (!request.allDay() && request.startTime() != null && request.endTime() != null) {
             if (request.endTime().isBefore(request.startTime())) {
@@ -111,6 +121,10 @@ public class EventService {
         Event event = eventMapper.toEvent(request, calendar);
         normalizeAllDayEventTimes(event, request);
 
+        return List.of(saveSingleEventInternal(calendar, event, request));
+    }
+
+    private String saveSingleEventInternal(Calendar calendar, Event event, EventRequest request) {
         if (event.getSubtasks() != null) {
             event.getSubtasks().forEach(subtask -> subtask.setEvent(event));
         }
@@ -151,24 +165,7 @@ public class EventService {
 
                 savedEvent.setGoogleCalendarId(googleEvent.getId());
                 savedEvent.setSyncStatus(SyncStatus.SYNCED);
-//                there is the planner logic will be created!
                 eventRepository.save(savedEvent);
-
-                // In createEvent(), after eventRepository.save():
-                try {
-                    kafkaTemplate.send("reminder-events", savedEvent.getId(), Map.of(
-                            "eventId", savedEvent.getId(),
-                            "userId", calendar.getUserId(),
-                            "eventTitle", savedEvent.getTitle(),
-                            "action", "CREATE",
-                            "reminders", List.of(
-                                    Map.of("triggerTime",
-                                            savedEvent.getStartTime().minus(15, ChronoUnit.MINUTES).toString(),
-                                            "type", "EMAIL"))));
-                } catch (Exception e) {
-                    log.error("Failed to send creation notification to Kafka for event {}: {}", savedEvent.getId(),
-                            e.getMessage());
-                }
 
                 log.info("Event created and synced to Google Calendar. Event ID: {}, Google Calendar ID: {}",
                         savedEvent.getId(), googleEvent.getId());
@@ -199,11 +196,9 @@ public class EventService {
             }
         }
 
-        // FIX #3: Only add hardcoded Owner member when NOT syncing to Google.
-        // If Google-synced, syncAttendeesFromGoogle will populate real members
-        // from the Google event (organizer + attendees). Adding a dummy "Owner"
-        // here would create a stale row that gets deleted and re-created on every
-        // sync tick, which was the root cause of StaleObjectStateException.
+        // ─── Notification / Reminder Creation (Kafka) ───
+        sendReminderNotification(savedEvent, calendar, request);
+
         if (!shouldSyncToGoogle(calendar)) {
             Member member = Member.builder()
                     .fullName("Owner")
@@ -217,147 +212,129 @@ public class EventService {
         return savedEvent.getId();
     }
 
-    private void switchToPlannedMode(EventRequest request,  boolean isEveryDay, Calendar calendar) {
-        int total = checkWeekDays(request.planner()) * request.planner().numOfWeeks();
+    private List<String> switchToPlannedMode(EventRequest request, Calendar calendar) {
+        PlannerRequest planner = request.planner();
+        List<String> createdIds = new ArrayList<>();
 
-        for(int i = 0; i <= total; i++) {
-            Event event = eventMapper.toEvent(request, calendar);
-            normalizeAllDayEventTimes(event, request);
+        LocalDate startDate = request.date();
+        if (startDate == null && request.startTime() != null) {
+            startDate = request.startTime().atZone(ZoneId.of("UTC")).toLocalDate();
+        }
 
-            if (event.getSubtasks() != null) {
-                event.getSubtasks().forEach(subtask -> subtask.setEvent(event));
-            }
-            if (event.getAttachments() != null) {
-                event.getAttachments().forEach(attachment -> attachment.setEvent(event));
-            }
+        if (startDate == null) {
+            throw new EmptyFieldException("Start date or start time is required for planner mode");
+        }
 
-            Event savedEvent = eventRepository.save(event);
+        List<DayOfWeek> selectedDays = getTargetDays(planner);
 
-            if (request.location() != null) {
-                Location location = locationService.create(savedEvent.getId(), request.location());
-                savedEvent.setLocation(location);
-                savedEvent = eventRepository.save(savedEvent);
-            }
+        for (int w = 0; w < planner.numOfWeeks(); w++) {
+            for (DayOfWeek day : selectedDays) {
+                LocalDate targetDate = startDate.plusWeeks(w).with(TemporalAdjusters.nextOrSame(day));
 
-            if (shouldSyncToGoogle(calendar)) {
-                try {
-                    com.google.api.services.calendar.model.Event googleEvent;
-                    String userId = calendar.getUserId();
+                Instant newStart = null;
+                Instant newEnd = null;
 
-                    if (savedEvent.isAllDay()) {
-                        googleEvent = googleCalendarApiService.createAllDayEvent(
-                                userId,
-                                savedEvent.getTitle(),
-                                savedEvent.getDescription(),
-                                savedEvent.getLocation(),
-                                savedEvent.getStartTime());
-                    } else {
-                        googleEvent = googleCalendarApiService.createEvent(
-                                userId,
-                                savedEvent.getTitle(),
-                                savedEvent.getDescription(),
-                                savedEvent.getLocation(),
-                                savedEvent.getStartTime(),
-                                savedEvent.getEndTime(),
-                                savedEvent.getType().toString());
-                    }
-
-                    savedEvent.setGoogleCalendarId(googleEvent.getId());
-                    savedEvent.setSyncStatus(SyncStatus.SYNCED);
-//                there is the planner logic will be created!
-                    eventRepository.save(savedEvent);
-
-                    // In createEvent(), after eventRepository.save():
-                    try {
-                        kafkaTemplate.send("reminder-events", savedEvent.getId(), Map.of(
-                                "eventId", savedEvent.getId(),
-                                "userId", calendar.getUserId(),
-                                "eventTitle", savedEvent.getTitle(),
-                                "action", "CREATE",
-                                "reminders", List.of(
-                                        Map.of("triggerTime",
-                                                savedEvent.getStartTime().minus(15, ChronoUnit.MINUTES).toString(),
-                                                "type", "EMAIL"))));
-                    } catch (Exception e) {
-                        log.error("Failed to send creation notification to Kafka for event {}: {}", savedEvent.getId(),
-                                e.getMessage());
-                    }
-
-                    log.info("Event created and synced to Google Calendar. Event ID: {}, Google Calendar ID: {}",
-                            savedEvent.getId(), googleEvent.getId());
-                } catch (IOException e) {
-                    if (GoogleAuthService.isInvalidGrant(e)) {
-                        log.error("Google token revoked while creating event for user {}. "
-                                + "Event saved locally. Event ID: {}", calendar.getUserId(), savedEvent.getId());
-                        if (googleAuthService != null) {
-                            googleAuthService.markUserAsDisconnected(calendar.getUserId());
-                        }
-                        savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
-                    } else {
-                        log.error("Transient Google sync failure for event: {}. Will retry.", savedEvent.getId(), e);
-                        savedEvent.setSyncStatus(SyncStatus.PENDING);
-                    }
-                    eventRepository.save(savedEvent);
+                if (request.startTime() != null) {
+                    ZonedDateTime zdtStart = request.startTime().atZone(ZoneId.of("UTC"));
+                    newStart = zdtStart.withYear(targetDate.getYear())
+                            .withMonth(targetDate.getMonthValue())
+                            .withDayOfMonth(targetDate.getDayOfMonth())
+                            .toInstant();
                 }
-            } else {
-                if (googleAuthService != null && !googleAuthService.isGoogleConnected(calendar.getUserId())
-                        && calendar.getGoogleCalendarId() != null && !calendar.getGoogleCalendarId().isBlank()) {
-                    log.warn(
-                            "Event {} not synced due to AUTH_ERROR. Google auth is disconnected for user {}. Calendar ID: {}",
-                            savedEvent.getId(), calendar.getUserId(), calendar.getId());
-                    savedEvent.setSyncStatus(SyncStatus.AUTH_ERROR);
-                    eventRepository.save(savedEvent);
-                } else {
-                    log.debug("Event created locally without Google sync. Calendar ID: {}", calendar.getId());
-                }
-            }
 
-            // FIX #3: Only add hardcoded Owner member when NOT syncing to Google.
-            // If Google-synced, syncAttendeesFromGoogle will populate real members
-            // from the Google event (organizer + attendees). Adding a dummy "Owner"
-            // here would create a stale row that gets deleted and re-created on every
-            // sync tick, which was the root cause of StaleObjectStateException.
-            if (!shouldSyncToGoogle(calendar)) {
-                Member member = Member.builder()
-                        .fullName("Owner")
-                        .email("Owner")
-                        .isOwner(true)
-                        .event(savedEvent)
-                        .build();
-                memberRepository.save(member);
+                if (request.endTime() != null && request.startTime() != null) {
+                    long durationSeconds = java.time.Duration.between(request.startTime(), request.endTime()).getSeconds();
+                    newEnd = newStart.plusSeconds(durationSeconds);
+                }
+
+                EventRequest subRequest = new EventRequest(
+                        request.title(),
+                        request.description(),
+                        request.colorHex(),
+                        request.type(),
+                        targetDate,
+                        newStart,
+                        newEnd,
+                        request.allDay(),
+                        request.status(),
+                        request.subtasks(),
+                        request.attachments(),
+                        request.location(),
+                        null,
+                        request.notification());
+
+                Event event = eventMapper.toEvent(subRequest, calendar);
+                normalizeAllDayEventTimes(event, subRequest);
+
+                createdIds.add(saveSingleEventInternal(calendar, event, subRequest));
             }
         }
+        return createdIds;
     }
 
-    private int checkWeekDays(PlannerRequest plannerConfig) {
-        int total = 0;
-        if(plannerConfig.monday()){
-            total+=1;
+    private List<String> switchToPlannedModeWithMeet(EventRequest request, Calendar calendar) {
+        List<String> createdIds = new ArrayList<>();
+        PlannerRequest planner = request.planner();
+        List<DayOfWeek> targetDays = getTargetDays(planner);
+
+        Instant baseStart = request.startTime();
+        Instant baseEnd = request.endTime();
+        long durationMillis = java.time.Duration.between(baseStart, baseEnd).toMillis();
+
+        for (int week = 0; week < planner.numOfWeeks(); week++) {
+            for (DayOfWeek day : targetDays) {
+                Instant currentStart = baseStart.atZone(ZoneOffset.UTC)
+                        .with(TemporalAdjusters.nextOrSame(day))
+                        .plusWeeks(week)
+                        .toInstant();
+                Instant currentEnd = currentStart.plusMillis(durationMillis);
+
+                EventRequest newReq = new EventRequest(
+                        request.title(), request.description(), request.colorHex(),
+                        request.type(), request.date(),
+                        currentStart, currentEnd, request.allDay(), request.status(),
+                        request.subtasks(), request.attachments(), request.location(), null, request.notification());
+
+                Event event = eventMapper.toEvent(newReq, calendar);
+                createdIds.add(saveSingleEventWithMeetInternal(calendar, event, newReq));
+            }
         }
-        if(plannerConfig.tuesday()){
-            total+=1;
+        return createdIds;
+    }
+
+    private List<String> switchToPlannedModeWithZoom(EventRequest request, Calendar calendar, String userId) {
+        List<String> createdIds = new ArrayList<>();
+        PlannerRequest planner = request.planner();
+        List<DayOfWeek> targetDays = getTargetDays(planner);
+
+        Instant baseStart = request.startTime();
+        Instant baseEnd = request.endTime();
+        long durationMillis = java.time.Duration.between(baseStart, baseEnd).toMillis();
+
+        for (int week = 0; week < planner.numOfWeeks(); week++) {
+            for (DayOfWeek day : targetDays) {
+                Instant currentStart = baseStart.atZone(ZoneOffset.UTC)
+                        .with(TemporalAdjusters.nextOrSame(day))
+                        .plusWeeks(week)
+                        .toInstant();
+                Instant currentEnd = currentStart.plusMillis(durationMillis);
+
+                EventRequest newReq = new EventRequest(
+                        request.title(), request.description(), request.colorHex(),
+                        request.type(), request.date(),
+                        currentStart, currentEnd, request.allDay(), request.status(),
+                        request.subtasks(), request.attachments(), request.location(), null, request.notification());
+
+                Event event = eventMapper.toEvent(newReq, calendar);
+                createdIds.add(saveSingleEventWithZoomInternal(calendar, event, newReq, userId));
+            }
         }
-        if(plannerConfig.wednesday()){
-            total+=1;
-        }
-        if(plannerConfig.thursday()){
-            total+=1;
-        }
-        if(plannerConfig.friday()){
-            total+=1;
-        }
-        if(plannerConfig.saturday()){
-            total+=1;
-        }
-        if(plannerConfig.sunday()){
-            total+=1;
-        }
-        return total;
+        return createdIds;
     }
 
     @Transactional
     @CacheEvict(cacheNames = { EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE }, allEntries = true)
-    public String createEventWithGoogleMeet(String calendarId, EventRequest request) {
+    public List<String> createEventWithGoogleMeet(String calendarId, EventRequest request) {
 
         if (calendarId == null || calendarId.isBlank()) {
             throw new EmptyFieldException("Calendar ID cannot be empty");
@@ -366,15 +343,23 @@ public class EventService {
         Calendar calendar = calendarRepository.findById(calendarId)
                 .orElseThrow(() -> new ResourceNotFoundException("Calendar not found with ID: " + calendarId));
 
-        if (!request.allDay()
-                && request.startTime() != null
-                && request.endTime() != null
+        if (request.planner() != null) {
+            // For now, if planner is used with Meet, we could either:
+            // 1. Create multiple events but each with its own Meet link (simple but many links)
+            // 2. Not support it.
+            // Let's implement it with multiple Meet links for now to be consistent with individual creation.
+            return switchToPlannedModeWithMeet(request, calendar);
+        }
+        if (!request.allDay() && request.startTime() != null && request.endTime() != null
                 && request.endTime().isBefore(request.startTime())) {
             throw new InvalidTimeRangeException("End time cannot be before start time");
         }
 
         Event event = eventMapper.toEvent(request, calendar);
-        normalizeAllDayEventTimes(event, request);
+        return List.of(saveSingleEventWithMeetInternal(calendar, event, request));
+    }
+
+    private String saveSingleEventWithMeetInternal(Calendar calendar, Event event, EventRequest request) {
         if (event.getSubtasks() != null) {
             event.getSubtasks().forEach(subtask -> subtask.setEvent(event));
         }
@@ -494,6 +479,8 @@ public class EventService {
             memberRepository.save(member);
         }
 
+        sendReminderNotification(savedEvent, calendar, request);
+
         return savedEvent.getId();
     }
 
@@ -560,6 +547,7 @@ public class EventService {
             event.setConference(conference);
             event.setSyncStatus(SyncStatus.SYNCED);
             eventRepository.save(event);
+            publishReminderSnapshotUpdate(event);
 
             log.info("Google Meet added to event. Local ID: {}, Google ID: {}, Meet: {}",
                     event.getId(), googleEvent.getId(), meetLink);
@@ -603,6 +591,7 @@ public class EventService {
         Conference conference = event.getConference();
         event.setConference(null);
         eventRepository.save(event);
+        publishReminderSnapshotUpdate(event);
         conferenceRepository.delete(conference);
 
         log.info("Google Meet removed from event. Local ID: {}", id);
@@ -621,13 +610,17 @@ public class EventService {
 
     @Transactional
     @CacheEvict(cacheNames = { EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE }, allEntries = true)
-    public String createEventWithZoom(String calendarId, EventRequest request, String userId) {
+    public List<String> createEventWithZoom(String calendarId, EventRequest request, String userId) {
         if (calendarId == null || calendarId.isBlank()) {
             throw new EmptyFieldException("Calendar ID cannot be empty");
         }
 
         Calendar calendar = calendarRepository.findById(calendarId)
                 .orElseThrow(() -> new ResourceNotFoundException("Calendar not found with ID: " + calendarId));
+
+        if (request.planner() != null) {
+            return switchToPlannedModeWithZoom(request, calendar, userId);
+        }
 
         if (!request.allDay()
                 && request.startTime() != null
@@ -637,6 +630,10 @@ public class EventService {
         }
 
         Event event = eventMapper.toEvent(request, calendar);
+        return List.of(saveSingleEventWithZoomInternal(calendar, event, request, userId));
+    }
+
+    private String saveSingleEventWithZoomInternal(Calendar calendar, Event event, EventRequest request, String userId) {
         if (event.getSubtasks() != null) {
             event.getSubtasks().forEach(subtask -> subtask.setEvent(event));
         }
@@ -729,6 +726,8 @@ public class EventService {
             memberRepository.save(member);
         }
 
+        sendReminderNotification(savedEvent, calendar, request);
+
         return savedEvent.getId();
     }
 
@@ -776,6 +775,7 @@ public class EventService {
                 event.setDescription(description.toString());
             }
             eventRepository.save(event);
+            publishReminderSnapshotUpdate(event);
 
         } catch (Exception e) {
             log.error("Failed to add Zoom meeting to event. Event ID: {}", event.getId(), e);
@@ -826,6 +826,7 @@ public class EventService {
         event.setConference(null);
         event.setDescription(cleanedDescription);
         eventRepository.save(event);
+        publishReminderSnapshotUpdate(event);
 
         if (shouldSyncExistingGoogleEvent(event)) {
             try {
@@ -863,6 +864,72 @@ public class EventService {
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
     }
 
+    @Cacheable(cacheNames = EVENTS_DETAIL_CACHE, key = "'notification:' + #id")
+    public EventNotificationResponse getEventNotificationById(String id) {
+        if (id == null || id.isBlank()) {
+            throw new EmptyFieldException("Event ID cannot be empty");
+        }
+
+        Event event = eventRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
+
+        String joinUrl = null;
+        if (event.getConference() != null) {
+            var conf = event.getConference();
+            if (conf.getType() == com.flux.calendar_service.conference.Conference.ConferenceType.GOOGLE_MEET) {
+                if (conf.getMeetLink() != null && !conf.getMeetLink().isBlank()) {
+                    joinUrl = conf.getMeetLink();
+                } else if (conf.getConferenceLink() != null && !conf.getConferenceLink().isBlank()) {
+                    joinUrl = conf.getConferenceLink();
+                }
+            } else if (conf.getType() == com.flux.calendar_service.conference.Conference.ConferenceType.ZOOM) {
+                if (conf.getConferenceLink() != null && !conf.getConferenceLink().isBlank()) {
+                    joinUrl = conf.getConferenceLink();
+                } else if (conf.getMeetLink() != null && !conf.getMeetLink().isBlank()) {
+                    joinUrl = conf.getMeetLink();
+                }
+            } else {
+                if (conf.getConferenceLink() != null && !conf.getConferenceLink().isBlank()) {
+                    joinUrl = conf.getConferenceLink();
+                } else if (conf.getMeetLink() != null && !conf.getMeetLink().isBlank()) {
+                    joinUrl = conf.getMeetLink();
+                }
+            }
+        }
+
+        String locationText = null;
+        if (event.getLocation() != null) {
+            List<String> parts = new ArrayList<>();
+            if (event.getLocation().getPlaceName() != null && !event.getLocation().getPlaceName().isBlank()) {
+                parts.add(event.getLocation().getPlaceName());
+            }
+            if (event.getLocation().getStreetAddress() != null && !event.getLocation().getStreetAddress().isBlank()) {
+                parts.add(event.getLocation().getStreetAddress());
+            }
+            if (event.getLocation().getCity() != null && !event.getLocation().getCity().isBlank()) {
+                parts.add(event.getLocation().getCity());
+            }
+            if (event.getLocation().getCountry() != null && !event.getLocation().getCountry().isBlank()) {
+                parts.add(event.getLocation().getCountry());
+            }
+            if (event.getLocation().getBuildingName() != null && !event.getLocation().getBuildingName().isBlank()) {
+                parts.add(event.getLocation().getBuildingName());
+            }
+            if (event.getLocation().getFloor() != null) {
+                parts.add("Floor " + event.getLocation().getFloor());
+            }
+            if (event.getLocation().getRoom() != null && !event.getLocation().getRoom().isBlank()) {
+                parts.add("Room " + event.getLocation().getRoom());
+            }
+
+            if (!parts.isEmpty()) {
+                locationText = String.join(" · ", parts);
+            }
+        }
+
+        return eventMapper.toEventNotificationResponse(event, joinUrl, locationText);
+    }
+
     public Event getEventByIdTypeEvent(String id) {
         if (id == null || id.isBlank()) {
             throw new EmptyFieldException("Event ID cannot be empty");
@@ -870,6 +937,43 @@ public class EventService {
 
         return eventRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
+    }
+
+    public List<EventResponse> getMeetingsByCalendarId(String calendarId, String filter) {
+        if (calendarId == null || calendarId.isBlank()) {
+            throw new EmptyFieldException("Calendar ID cannot be empty");
+        }
+
+        calendarRepository.findById(calendarId)
+                .orElseThrow(() -> new ResourceNotFoundException("Calendar not found with ID: " + calendarId));
+
+        Instant now = Instant.now();
+
+        return eventRepository.findByCalendarId(calendarId)
+                .stream()
+                .filter(e -> e.getType() != null && e.getType() == EventType.MEETING)
+                .filter(e -> {
+                    if ("all".equalsIgnoreCase(filter)) return true;
+                    if (e.getStartTime() == null) return false;
+                    if ("today".equalsIgnoreCase(filter)) {
+                        Instant dayStart = now.truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+                        Instant dayEnd = dayStart.plus(1, java.time.temporal.ChronoUnit.DAYS);
+                        return !e.getStartTime().isBefore(dayStart) && e.getStartTime().isBefore(dayEnd);
+                    }
+                    if ("upcoming".equalsIgnoreCase(filter)) {
+                        Instant dayEnd = now.truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                                .plus(1, java.time.temporal.ChronoUnit.DAYS);
+                        return !e.getStartTime().isBefore(dayEnd);
+                    }
+                    if ("past".equalsIgnoreCase(filter)) {
+                        Instant dayStart = now.truncatedTo(java.time.temporal.ChronoUnit.DAYS);
+                        return e.getStartTime().isBefore(dayStart);
+                    }
+                    return true;
+                })
+                .sorted(java.util.Comparator.comparing(Event::getStartTime, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
+                .map(eventMapper::toEventResponse)
+                .collect(Collectors.toList());
     }
 
     public List<EventResponse> getEventsByCalendarId(String calendarId) {
@@ -995,6 +1099,7 @@ public class EventService {
         }
 
         eventRepository.save(event);
+        publishReminderSnapshotUpdate(event);
 
         if (shouldSyncExistingGoogleEvent(event)) {
             try {
@@ -1062,7 +1167,7 @@ public class EventService {
 
     @Transactional
     @CacheEvict(cacheNames = { EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE }, allEntries = true)
-    public String createEventWithLocation(String calendarId, EventRequest request) {
+    public List<String> createEventWithLocation(String calendarId, EventRequest request) {
         return createEvent(calendarId, request);
     }
 
@@ -1580,6 +1685,21 @@ public class EventService {
         }
     }
 
+    private List<DayOfWeek> getTargetDays(PlannerRequest planner) {
+        List<DayOfWeek> selectedDays = new ArrayList<>();
+        if (planner.monday()) selectedDays.add(DayOfWeek.MONDAY);
+        if (planner.tuesday()) selectedDays.add(DayOfWeek.TUESDAY);
+        if (planner.wednesday()) selectedDays.add(DayOfWeek.WEDNESDAY);
+        if (planner.thursday()) selectedDays.add(DayOfWeek.THURSDAY);
+        if (planner.friday()) selectedDays.add(DayOfWeek.FRIDAY);
+        if (planner.saturday()) selectedDays.add(DayOfWeek.SATURDAY);
+        if (planner.sunday()) selectedDays.add(DayOfWeek.SUNDAY);
+        if (selectedDays.isEmpty()) {
+            throw new EmptyFieldException("At least one day of the week must be selected");
+        }
+        return selectedDays;
+    }
+
     private String mapGoogleColorIdToHex(String colorId) {
         return switch (colorId) {
             case "1" -> "#a4bdfc";
@@ -1595,5 +1715,173 @@ public class EventService {
             case "11" -> "#dc2127";
             default -> "#3788d8";
         };
+    }
+
+    private void sendReminderNotification(Event savedEvent, Calendar calendar, EventRequest request) {
+        if (request.notification() != null && request.notification().isEnabled()) {
+            try {
+                if (savedEvent.getStartTime() == null) {
+                    log.warn("Skipping reminder event publish: event {} has null startTime", savedEvent.getId());
+                    return;
+                }
+
+                int mins = request.notification().getMinutesBefore();
+                String type = request.notification().getType();
+                if (type == null) type = "EMAIL";
+
+                String joinUrl = null;
+                String meetingType = null;
+                String meetingCode = null;
+                String dialInPhone = null;
+                String dialInPin = null;
+                String meetingPassword = null;
+
+                if (savedEvent.getConference() != null) {
+                    var conf = savedEvent.getConference();
+                    meetingType = conf.getType() != null ? conf.getType().name() : null;
+                    meetingCode = conf.getMeetingCode();
+                    dialInPhone = conf.getPhoneNumber();
+                    dialInPin = conf.getPin();
+                    meetingPassword = conf.getConferencePassword();
+
+                    if (conf.getConferenceLink() != null && !conf.getConferenceLink().isBlank()) {
+                        joinUrl = conf.getConferenceLink();
+                    } else if (conf.getMeetLink() != null && !conf.getMeetLink().isBlank()) {
+                        joinUrl = conf.getMeetLink();
+                    }
+                }
+
+                String locationText = null;
+                if (savedEvent.getLocation() != null) {
+                    List<String> parts = new ArrayList<>();
+                    var loc = savedEvent.getLocation();
+                    if (loc.getPlaceName() != null && !loc.getPlaceName().isBlank()) parts.add(loc.getPlaceName());
+                    if (loc.getStreetAddress() != null && !loc.getStreetAddress().isBlank()) parts.add(loc.getStreetAddress());
+                    if (loc.getCity() != null && !loc.getCity().isBlank()) parts.add(loc.getCity());
+                    if (loc.getCountry() != null && !loc.getCountry().isBlank()) parts.add(loc.getCountry());
+                    if (loc.getBuildingName() != null && !loc.getBuildingName().isBlank()) parts.add(loc.getBuildingName());
+                    if (loc.getFloor() != null) parts.add("Floor " + loc.getFloor());
+                    if (loc.getRoom() != null && !loc.getRoom().isBlank()) parts.add("Room " + loc.getRoom());
+                    if (!parts.isEmpty()) locationText = String.join(" · ", parts);
+                }
+
+                Map<String, Object> message = new LinkedHashMap<>();
+                message.put("eventId", savedEvent.getId());
+                message.put("userId", calendar.getUserId());
+                message.put("eventTitle", savedEvent.getTitle());
+                message.put("eventDescription", savedEvent.getDescription());
+                message.put("eventStartTime", savedEvent.getStartTime() != null ? savedEvent.getStartTime().toString() : null);
+                message.put("eventEndTime", savedEvent.getEndTime() != null ? savedEvent.getEndTime().toString() : null);
+                message.put("allDay", savedEvent.isAllDay());
+                message.put("locationText", locationText);
+                message.put("meetingType", meetingType);
+                message.put("joinUrl", joinUrl);
+                message.put("meetingCode", meetingCode);
+                message.put("dialInPhone", dialInPhone);
+                message.put("dialInPin", dialInPin);
+                message.put("meetingPassword", meetingPassword);
+                message.put("subtasks", savedEvent.getSubtasks() != null
+                        ? savedEvent.getSubtasks().stream()
+                                .map(st -> {
+                                    Map<String, Object> m = new LinkedHashMap<>();
+                                    m.put("id", st.getId());
+                                    m.put("subtask", st.getSubtask());
+                                    m.put("isDone", st.isDone());
+                                    return m;
+                                })
+                                .toList()
+                        : List.of());
+                message.put("action", "CREATE");
+                message.put("reminders", List.of(Map.of(
+                        "triggerTime", savedEvent.getStartTime().minus(mins, ChronoUnit.MINUTES).toString(),
+                        "type", type
+                )));
+
+                kafkaTemplate.send("reminder-events", savedEvent.getId(), message);
+            } catch (Exception e) {
+                log.error("Failed to send creation notification to Kafka for event {}: {}", savedEvent.getId(),
+                        e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Publish an event snapshot update so reminder emails can render up-to-date details
+     * without calling back into calendar-service.
+     *
+     * This does not create/cancel reminders; it only updates the stored snapshot.
+     */
+    private void publishReminderSnapshotUpdate(Event event) {
+        try {
+            if (event == null || event.getId() == null || event.getId().isBlank()) return;
+
+            String joinUrl = null;
+            String meetingType = null;
+            String meetingCode = null;
+            String dialInPhone = null;
+            String dialInPin = null;
+            String meetingPassword = null;
+
+            if (event.getConference() != null) {
+                var conf = event.getConference();
+                meetingType = conf.getType() != null ? conf.getType().name() : null;
+                meetingCode = conf.getMeetingCode();
+                dialInPhone = conf.getPhoneNumber();
+                dialInPin = conf.getPin();
+                meetingPassword = conf.getConferencePassword();
+
+                if (conf.getConferenceLink() != null && !conf.getConferenceLink().isBlank()) {
+                    joinUrl = conf.getConferenceLink();
+                } else if (conf.getMeetLink() != null && !conf.getMeetLink().isBlank()) {
+                    joinUrl = conf.getMeetLink();
+                }
+            }
+
+            String locationText = null;
+            if (event.getLocation() != null) {
+                List<String> parts = new ArrayList<>();
+                var loc = event.getLocation();
+                if (loc.getPlaceName() != null && !loc.getPlaceName().isBlank()) parts.add(loc.getPlaceName());
+                if (loc.getStreetAddress() != null && !loc.getStreetAddress().isBlank()) parts.add(loc.getStreetAddress());
+                if (loc.getCity() != null && !loc.getCity().isBlank()) parts.add(loc.getCity());
+                if (loc.getCountry() != null && !loc.getCountry().isBlank()) parts.add(loc.getCountry());
+                if (loc.getBuildingName() != null && !loc.getBuildingName().isBlank()) parts.add(loc.getBuildingName());
+                if (loc.getFloor() != null) parts.add("Floor " + loc.getFloor());
+                if (loc.getRoom() != null && !loc.getRoom().isBlank()) parts.add("Room " + loc.getRoom());
+                if (!parts.isEmpty()) locationText = String.join(" · ", parts);
+            }
+
+            Map<String, Object> message = new LinkedHashMap<>();
+            message.put("eventId", event.getId());
+            message.put("userId", event.getCalendar() != null ? event.getCalendar().getUserId() : null);
+            message.put("eventTitle", event.getTitle());
+            message.put("eventDescription", event.getDescription());
+            message.put("eventStartTime", event.getStartTime() != null ? event.getStartTime().toString() : null);
+            message.put("eventEndTime", event.getEndTime() != null ? event.getEndTime().toString() : null);
+            message.put("allDay", event.isAllDay());
+            message.put("locationText", locationText);
+            message.put("meetingType", meetingType);
+            message.put("joinUrl", joinUrl);
+            message.put("meetingCode", meetingCode);
+            message.put("dialInPhone", dialInPhone);
+            message.put("dialInPin", dialInPin);
+            message.put("meetingPassword", meetingPassword);
+            message.put("subtasks", event.getSubtasks() != null
+                    ? event.getSubtasks().stream()
+                            .map(st -> {
+                                Map<String, Object> m = new LinkedHashMap<>();
+                                m.put("id", st.getId());
+                                m.put("subtask", st.getSubtask());
+                                m.put("isDone", st.isDone());
+                                return m;
+                            })
+                            .toList()
+                    : List.of());
+            message.put("action", "SNAPSHOT_UPDATE");
+
+            kafkaTemplate.send("reminder-events", event.getId(), message);
+        } catch (Exception e) {
+            log.warn("Failed to publish reminder snapshot update for event {}: {}", event != null ? event.getId() : null, e.getMessage());
+        }
     }
 }

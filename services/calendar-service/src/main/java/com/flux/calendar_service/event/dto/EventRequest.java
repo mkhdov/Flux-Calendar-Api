@@ -1,5 +1,6 @@
 package com.flux.calendar_service.event.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.flux.calendar_service.config.FlexibleInstantDeserializer;
 import com.flux.calendar_service.event.EventStatus;
@@ -27,6 +28,7 @@ public record EventRequest(
         @Schema(description = "Current status of the event") EventStatus status,
         @Schema(description = "List of subtasks associated with the event") java.util.List<com.flux.calendar_service.subtask.dto.SubtaskRequest> subtasks,
         @Schema(description = "List of attachments associated with the event") java.util.List<com.flux.calendar_service.attachment.dto.AttachmentRequest> attachments,
-        @Schema(description = "Location associated with event") LocationRequest location,
-        @Schema(description = "Planner mode") PlannerRequest planner) {
+        @Schema(description = "Location associated with event") @JsonProperty("location") LocationRequest location,
+        @Schema(description = "Planner mode") @JsonProperty("planner") PlannerRequest planner,
+        @Schema(description = "Notification settings") @JsonProperty("notification") NotificationRequest notification) {
 }

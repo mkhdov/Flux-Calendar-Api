@@ -25,13 +25,26 @@ public class ReminderEvent {
     private String eventId;
     private String userId;
     private String eventTitle;
+    private String eventDescription;
+    private Instant eventStartTime;
+    private Instant eventEndTime;
+    private Boolean allDay;
+    private String locationText;
+    private String meetingType; // ZOOM | GOOGLE_MEET
+    private String joinUrl;
+    private String meetingCode;
+    private String dialInPhone;
+    private String dialInPin;
+    private String meetingPassword;
+    private List<Subtask> subtasks;
     private Action action;
     private List<ReminderDetail> reminders;
 
     public enum Action {
         CREATE,
         UPDATE,
-        DELETE
+        DELETE,
+        SNAPSHOT_UPDATE
     }
 
     @Getter
@@ -42,5 +55,16 @@ public class ReminderEvent {
     public static class ReminderDetail {
         private Instant triggerTime;
         private ReminderType type;
+    }
+
+    @Getter
+    @Setter
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Subtask {
+        private String id;
+        private String subtask;
+        private boolean isDone;
     }
 }
