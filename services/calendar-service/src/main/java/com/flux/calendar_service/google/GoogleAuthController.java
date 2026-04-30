@@ -175,6 +175,46 @@ public class GoogleAuthController {
     }
 
     /**
+     * Mobile Google OAuth linking
+     * POST /auth/google/mobile-link
+     */
+    @Operation(summary = "Google OAuth mobile link", description = "Endpoint where mobile apps send serverAuthCode")
+    @PostMapping("/google/mobile-link")
+    public Map<String, Object> handleGoogleMobileLink(
+            @RequestParam("userId") String userId,
+            @org.springframework.web.bind.annotation.RequestBody Map<String, String> payload) {
+        try {
+            String serverAuthCode = payload.get("serverAuthCode");
+            String email = payload.get("email");
+
+            if (serverAuthCode == null || serverAuthCode.isBlank()) {
+                throw new UnauthorizedException("Missing serverAuthCode from mobile client");
+            }
+
+            // For mobile flow, redirect URI is generally empty
+            Credential credential = authService.exchangeCodeForToken(serverAuthCode, userId, "");
+
+            String googleCalendarId = email;
+            if (googleCalendarApiService != null) {
+                try {
+                    googleCalendarId = googleCalendarApiService.getPrimaryCalendarId(userId);
+                } catch (Exception ignored) {}
+            }
+            if (googleCalendarId == null) {
+                googleCalendarId = "primary";
+            }
+
+            ensureGoogleSyncCalendar(userId, googleCalendarId);
+            authService.markUserAsConnected(userId, googleCalendarId);
+
+            return Map.of("status", "success", "message", "Linked via mobile");
+        } catch (Exception e) {
+            System.err.println("❌ Error in mobile-link: " + e.getMessage());
+            return Map.of("status", "error", "message", "Auth failed: " + e.getMessage());
+        }
+    }
+
+    /**
      * Check authentication status (DB-based).
      * GET /auth/status
      */

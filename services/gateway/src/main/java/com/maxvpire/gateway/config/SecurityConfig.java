@@ -81,19 +81,17 @@ public class SecurityConfig {
         } else {
             configuration.setAllowedOrigins(List.of(frontendUrl));
         }
-        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of(
-                "Authorization",
-                "Cache-Control",
-                "Content-Type",
-                "Accept",
-                "Origin",
-                "X-Requested-With",
-                "X-User-Id"
-        ));
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"));
+        configuration.setAllowedHeaders(List.of("*")); // Allow all headers dynamically
+        configuration.setExposedHeaders(List.of("Authorization", "X-User-Id"));
         configuration.setAllowCredentials(true);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
         return source;
+    }
+
+    @Bean
+    public org.springframework.web.cors.reactive.CorsWebFilter corsWebFilter() {
+        return new org.springframework.web.cors.reactive.CorsWebFilter(corsConfigurationSource());
     }
 }

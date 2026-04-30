@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flux.calendar_service.conference.Conference;
 import com.flux.calendar_service.conference.ConferenceRepository;
+import com.flux.calendar_service.connects.ConnectService;
 import com.flux.calendar_service.event.Event;
 import com.flux.calendar_service.event.EventRepository;
 import com.flux.calendar_service.exception.ResourceNotFoundException;
@@ -34,6 +35,7 @@ public class ZoomMeetingService {
     private final EventRepository eventRepository;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper objectMapper;
+    private final ConnectService connectService;
 
     private static final String ZOOM_TOKEN_KEY_PREFIX = "zoom:token:";
     private static final String ZOOM_REFRESH_TOKEN_KEY_PREFIX = "zoom:refresh:";
@@ -57,7 +59,8 @@ public class ZoomMeetingService {
             result.put("success", true);
             result.put("email", userInfo.get("email"));
             result.put("message", "Zoom connected successfully");
-
+            //connect zoom mark
+            connectService.connectZoom(userId);
             return result;
         } catch (Exception e) {
             log.error("Error connecting Zoom for user: {}", userId, e);
@@ -74,7 +77,7 @@ public class ZoomMeetingService {
             // Remove tokens from Redis
             redisTemplate.delete(ZOOM_TOKEN_KEY_PREFIX + userId);
             redisTemplate.delete(ZOOM_REFRESH_TOKEN_KEY_PREFIX + userId);
-
+            connectService.disconnectZoom(userId);
             log.info("Zoom disconnected for user: {}", userId);
         } catch (Exception e) {
             log.error("Error disconnecting Zoom for user: {}", userId, e);

@@ -10,7 +10,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.flux.notification_service.notification.NotificationPayload;
@@ -36,7 +37,6 @@ public class ReminderProcessor {
     private final ReminderRepository reminderRepository;
     private final NotificationSenderFactory senderFactory;
     private final RedisTemplate<String, String> redisTemplate;
-    private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
     @Value("${notification.retry.max-attempts:3}")
@@ -44,12 +44,6 @@ public class ReminderProcessor {
 
     @Value("${notification.dedup.ttl-hours:24}")
     private long dedupTtlHours;
-
-    @Value("${user-management-service.url:http://user-management-service:8081}")
-    private String userServiceUrl;
-
-    @Value("${calendar-service.url:http://calendar-service:8082}")
-    private String calendarServiceUrl;
 
     private static final String DEDUP_KEY_PREFIX = "reminder:sent:";
 
@@ -91,52 +85,30 @@ public class ReminderProcessor {
                 return;
             }
 
-            // Resolve user email
-            String userEmail = resolveUserEmail(reminder.getUserId());
-
-            // Resolve event details (fallback only; preferred source is snapshot stored in Reminder)
-            Map<String, Object> eventDetails = java.util.Collections.emptyMap();
-            if (needsEventLookup(reminder)) {
-                eventDetails = resolveEventDetails(reminder.getEventId());
-            }
-
-            String eventTitle = firstNonBlank(reminder.getEventTitle(),
-                    (String) eventDetails.getOrDefault("title", "Calendar Event"));
-            String eventDescription = firstNonBlank(reminder.getEventDescription(),
-                    (String) eventDetails.get("description"));
-
-            Instant startTime = reminder.getEventStartTime() != null
-                    ? reminder.getEventStartTime()
-                    : parseInstant(eventDetails.get("startTime"));
-            Instant endTime = reminder.getEventEndTime() != null
-                    ? reminder.getEventEndTime()
-                    : parseInstant(eventDetails.get("endTime"));
-
-            Boolean allDay = reminder.getAllDay();
-            if (allDay == null) {
-                Object allDayObj = eventDetails.get("allDay");
-                if (allDayObj instanceof Boolean b) allDay = b;
-                if (allDayObj instanceof String s) allDay = Boolean.parseBoolean(s);
-            }
-
-            String meetingUrl = firstNonBlank(reminder.getJoinUrl(), asString(eventDetails.get("joinUrl")));
-            String meetingType = firstNonBlank(reminder.getMeetingType(), asString(eventDetails.get("meetingType")));
-            String meetingCode = firstNonBlank(reminder.getMeetingCode(), asString(eventDetails.get("meetingCode")));
-            String dialInPhone = firstNonBlank(reminder.getDialInPhone(), asString(eventDetails.get("phoneNumber")));
-            String dialInPin = firstNonBlank(reminder.getDialInPin(), asString(eventDetails.get("pin")));
-            String meetingPassword = firstNonBlank(reminder.getMeetingPassword(), asString(eventDetails.get("meetingPassword")));
-            String locationText = firstNonBlank(reminder.getLocationText(), (String) eventDetails.get("locationText"));
+            String eventTitle      = reminder.getEventTitle() != null ? reminder.getEventTitle() : "Calendar Event";
+            String eventDescription= reminder.getEventDescription();
+            Instant startTime      = reminder.getEventStartTime();
+            Instant endTime        = reminder.getEventEndTime();
+            Boolean allDay         = reminder.getAllDay() != null ? reminder.getAllDay() : false;
+            
+            String meetingUrl      = reminder.getJoinUrl();
+            String meetingType     = reminder.getMeetingType();
+            String meetingCode     = reminder.getMeetingCode();
+            String dialInPhone     = reminder.getDialInPhone();
+            String dialInPin       = reminder.getDialInPin();
+            String meetingPassword = reminder.getMeetingPassword();
+            String locationText    = reminder.getLocationText();
 
             List<NotificationSubtask> subtasks = reminder.getSubtasksJson() != null && !reminder.getSubtasksJson().isBlank()
                     ? parseSubtasksJson(reminder.getSubtasksJson())
-                    : parseSubtasks(eventDetails.get("subtasks"));
+                    : List.of();
 
-            // Build notification payload
+            // Build notification payload strictly from Kafka-stored database snapshot
             NotificationPayload payload = NotificationPayload.builder()
                     .reminderId(reminder.getId())
                     .eventId(reminder.getEventId())
                     .userId(reminder.getUserId())
-                    .userEmail(userEmail)
+                    .userEmail(null) // Email omitted unless synchronously resolved or replicated via User service
                     .eventTitle(eventTitle)
                     .eventDescription(eventDescription)
                     .eventStartTime(startTime)
@@ -165,17 +137,6 @@ public class ReminderProcessor {
         } catch (Exception e) {
             handleFailure(reminder, e);
         }
-    }
-
-    private Instant parseInstant(Object val) {
-        if (val == null) return null;
-        try {
-            if (val instanceof String s) return Instant.parse(s);
-            if (val instanceof Long l) return Instant.ofEpochMilli(l);
-        } catch (Exception e) {
-            log.warn("Failed to parse instant from {}: {}", val, e.getMessage());
-        }
-        return null;
     }
 
     private List<NotificationSubtask> parseSubtasks(Object val) {
@@ -210,29 +171,6 @@ public class ReminderProcessor {
         }
     }
 
-    private boolean needsEventLookup(Reminder reminder) {
-        if (reminder == null) return true;
-        return isBlank(reminder.getEventTitle())
-                || reminder.getEventStartTime() == null;
-    }
-
-    private boolean isBlank(String s) {
-        return s == null || s.isBlank();
-    }
-
-    private String asString(Object o) {
-        return o == null ? null : o.toString();
-    }
-
-    private String firstNonBlank(String a, String b) {
-        if (a != null && !a.isBlank()) return a;
-        if (b != null && !b.isBlank()) return b;
-        return null;
-    }
-
-    /**
-     * Mark reminder as SENT and record in Redis for dedup.
-     */
     private void markSent(Reminder reminder, String dedupKey) {
         reminder.setStatus(ReminderStatus.SENT);
         reminder.setSentAt(Instant.now());
@@ -241,9 +179,6 @@ public class ReminderProcessor {
         redisTemplate.opsForValue().set(dedupKey, "SENT", dedupTtlHours, TimeUnit.HOURS);
     }
 
-    /**
-     * Handle processing failure: increment retry count or mark FAILED.
-     */
     private void handleFailure(Reminder reminder, Exception e) {
         int newRetryCount = reminder.getRetryCount() + 1;
         reminder.setRetryCount(newRetryCount);
@@ -253,49 +188,10 @@ public class ReminderProcessor {
             log.error("Reminder {} FAILED after {} retries. Event: {}, Type: {}",
                     reminder.getId(), newRetryCount, reminder.getEventId(), reminder.getType(), e);
         } else {
-            // Keep PENDING for retry on next scheduler tick
             log.warn("Reminder {} failed (attempt {}/{}). Will retry. Error: {}",
                     reminder.getId(), newRetryCount, maxRetryAttempts, e.getMessage());
         }
 
         reminderRepository.save(reminder);
-    }
-
-    /**
-     * Resolve user email via REST call to user-management-service.
-     */
-    private String resolveUserEmail(String userId) {
-        String path = "/users/" + userId + "/email";
-        return tryGetMap(userServiceUrl + path)
-                .or(() -> tryGetMap("http://localhost:8081" + path))
-                .map(m -> m.get("email"))
-                .map(Object::toString)
-                .map(String::trim)
-                .filter(s -> !s.isBlank())
-                .orElse(null);
-    }
-
-    /**
-     * Resolve event details via REST call to calendar-service.
-     * Falls back gracefully if the call fails.
-     */
-    private Map<String, Object> resolveEventDetails(String eventId) {
-        String path = "/events/" + eventId + "/notification";
-
-        return tryGetMap(calendarServiceUrl + path)
-                .or(() -> tryGetMap("http://localhost:8082" + path))
-                .or(() -> tryGetMap("http://localhost:8083" + path))
-                .orElseGet(java.util.Collections::emptyMap);
-    }
-
-    private Optional<Map<String, Object>> tryGetMap(String url) {
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> response = restTemplate.getForObject(url, java.util.Map.class);
-            return Optional.ofNullable(response);
-        } catch (Exception e) {
-            log.warn("Failed to GET {}: {}", url, e.getMessage());
-            return Optional.empty();
-        }
     }
 }

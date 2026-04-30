@@ -7,3 +7,6 @@ spring:
       password: ${CONFIG_PASSWORD}
   application:
     name: ${NOTIFICATION_CONFIG_APP_NAME:notification-service}
+
+firebase:
+  service-account-path: classpath:flux-b2ae0-firebase-adminsdk-fbsvc-2934f05634.json
