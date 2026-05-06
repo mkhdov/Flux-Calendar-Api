@@ -6,7 +6,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component("pushNotificationSender")
 @RequiredArgsConstructor
@@ -14,6 +19,8 @@ import java.util.List;
 public class PushNotificationSender implements NotificationSender {
 
     private final DeviceTokenService deviceTokenService;
+    private static final DateTimeFormatter UTC_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'")
+            .withZone(ZoneOffset.UTC);
 
     @Override
     public void send(NotificationPayload payload) throws Exception {
@@ -24,21 +31,18 @@ public class PushNotificationSender implements NotificationSender {
             return;
         }
 
-        String title = "📅 " + (payload.getEventTitle() != null ? payload.getEventTitle() : "Upcoming Event");
-        String body  = buildBody(payload);
+        String title = buildTitle(payload);
+        String body = buildBody(payload);
+        Map<String, String> data = buildData(payload, title, body);
 
         for (String token : tokens) {
             try {
                 Message message = Message.builder()
                         .setToken(token)
-                        // Pure Data payload ensures the Flutter onBackgroundMessage handler 
-                        // is aggressively awoken by the OS, rather than the OS rendering 
-                        // it silently or incorrectly.
-                        .putData("title", title)
-                        .putData("body", body)
-                        .putData("eventId",   nvl(payload.getEventId()))
-                        .putData("reminderId", nvl(payload.getReminderId()))
-                        .putData("type",      "REMINDER")
+                        .setAndroidConfig(AndroidConfig.builder()
+                                .setPriority(AndroidConfig.Priority.HIGH)
+                                .build())
+                        .putAllData(data)
                         .build();
 
                 String messageId = FirebaseMessaging.getInstance().send(message);
@@ -57,15 +61,58 @@ public class PushNotificationSender implements NotificationSender {
         }
     }
 
-    private String buildBody(NotificationPayload payload) {
-        String title = payload.getEventTitle() != null ? payload.getEventTitle() : "your event";
-        if (payload.getEventStartTime() != null) {
-            return "Your event \"" + title + "\" is starting soon. Tap to view details.";
+    private String buildTitle(NotificationPayload payload) {
+        String eventTitle = payload.getEventTitle();
+        if (eventTitle == null || eventTitle.isBlank()) {
+            return "📅 Upcoming Event";
         }
-        return "You have an upcoming event: " + title;
+        return "📅 " + eventTitle;
+    }
+
+    private String buildBody(NotificationPayload payload) {
+        String title = payload.getEventTitle() != null && !payload.getEventTitle().isBlank()
+                ? payload.getEventTitle()
+                : "Calendar Event";
+
+        String when;
+        if (Boolean.TRUE.equals(payload.getAllDay())) {
+            when = "All-day";
+        } else if (payload.getEventStartTime() != null) {
+            when = "Starts " + UTC_FMT.format(payload.getEventStartTime());
+        } else {
+            when = "Starting soon";
+        }
+
+        String where = payload.getEventLocation() != null && !payload.getEventLocation().isBlank()
+                ? " • " + payload.getEventLocation()
+                : "";
+
+        return title + " — " + when + where;
     }
 
     private String nvl(String s) {
         return s != null ? s : "";
+    }
+
+    private Map<String, String> buildData(NotificationPayload payload, String title, String body) {
+        Map<String, String> data = new LinkedHashMap<>();
+        data.put("type", "REMINDER");
+        data.put("title", title);
+        data.put("body", body);
+
+        data.put("eventId", nvl(payload.getEventId()));
+        data.put("reminderId", nvl(payload.getReminderId()));
+
+        data.put("eventTitle", nvl(payload.getEventTitle()));
+        data.put("eventLocation", nvl(payload.getEventLocation()));
+        data.put("allDay", payload.getAllDay() != null ? payload.getAllDay().toString() : "");
+
+        Instant start = payload.getEventStartTime();
+        Instant end = payload.getEventEndTime();
+        data.put("eventStartTime", start != null ? start.toString() : "");
+        data.put("eventEndTime", end != null ? end.toString() : "");
+
+        data.put("meetingUrl", nvl(payload.getMeetingUrl()));
+        return data;
     }
 }

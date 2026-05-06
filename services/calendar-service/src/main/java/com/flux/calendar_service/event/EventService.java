@@ -243,7 +243,8 @@ public class EventService {
                 }
 
                 if (request.endTime() != null && request.startTime() != null) {
-                    long durationSeconds = java.time.Duration.between(request.startTime(), request.endTime()).getSeconds();
+                    long durationSeconds = java.time.Duration.between(request.startTime(), request.endTime())
+                            .getSeconds();
                     newEnd = newStart.plusSeconds(durationSeconds);
                 }
 
@@ -345,9 +346,11 @@ public class EventService {
 
         if (request.planner() != null) {
             // For now, if planner is used with Meet, we could either:
-            // 1. Create multiple events but each with its own Meet link (simple but many links)
+            // 1. Create multiple events but each with its own Meet link (simple but many
+            // links)
             // 2. Not support it.
-            // Let's implement it with multiple Meet links for now to be consistent with individual creation.
+            // Let's implement it with multiple Meet links for now to be consistent with
+            // individual creation.
             return switchToPlannedModeWithMeet(request, calendar);
         }
         if (!request.allDay() && request.startTime() != null && request.endTime() != null
@@ -633,7 +636,8 @@ public class EventService {
         return List.of(saveSingleEventWithZoomInternal(calendar, event, request, userId));
     }
 
-    private String saveSingleEventWithZoomInternal(Calendar calendar, Event event, EventRequest request, String userId) {
+    private String saveSingleEventWithZoomInternal(Calendar calendar, Event event, EventRequest request,
+            String userId) {
         if (event.getSubtasks() != null) {
             event.getSubtasks().forEach(subtask -> subtask.setEvent(event));
         }
@@ -953,8 +957,10 @@ public class EventService {
                 .stream()
                 .filter(e -> e.getType() != null && e.getType() == EventType.MEETING)
                 .filter(e -> {
-                    if ("all".equalsIgnoreCase(filter)) return true;
-                    if (e.getStartTime() == null) return false;
+                    if ("all".equalsIgnoreCase(filter))
+                        return true;
+                    if (e.getStartTime() == null)
+                        return false;
                     if ("today".equalsIgnoreCase(filter)) {
                         Instant dayStart = now.truncatedTo(java.time.temporal.ChronoUnit.DAYS);
                         Instant dayEnd = dayStart.plus(1, java.time.temporal.ChronoUnit.DAYS);
@@ -971,7 +977,8 @@ public class EventService {
                     }
                     return true;
                 })
-                .sorted(java.util.Comparator.comparing(Event::getStartTime, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
+                .sorted(java.util.Comparator.comparing(Event::getStartTime,
+                        java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())))
                 .map(eventMapper::toEventResponse)
                 .collect(Collectors.toList());
     }
@@ -1687,13 +1694,20 @@ public class EventService {
 
     private List<DayOfWeek> getTargetDays(PlannerRequest planner) {
         List<DayOfWeek> selectedDays = new ArrayList<>();
-        if (planner.monday()) selectedDays.add(DayOfWeek.MONDAY);
-        if (planner.tuesday()) selectedDays.add(DayOfWeek.TUESDAY);
-        if (planner.wednesday()) selectedDays.add(DayOfWeek.WEDNESDAY);
-        if (planner.thursday()) selectedDays.add(DayOfWeek.THURSDAY);
-        if (planner.friday()) selectedDays.add(DayOfWeek.FRIDAY);
-        if (planner.saturday()) selectedDays.add(DayOfWeek.SATURDAY);
-        if (planner.sunday()) selectedDays.add(DayOfWeek.SUNDAY);
+        if (planner.monday())
+            selectedDays.add(DayOfWeek.MONDAY);
+        if (planner.tuesday())
+            selectedDays.add(DayOfWeek.TUESDAY);
+        if (planner.wednesday())
+            selectedDays.add(DayOfWeek.WEDNESDAY);
+        if (planner.thursday())
+            selectedDays.add(DayOfWeek.THURSDAY);
+        if (planner.friday())
+            selectedDays.add(DayOfWeek.FRIDAY);
+        if (planner.saturday())
+            selectedDays.add(DayOfWeek.SATURDAY);
+        if (planner.sunday())
+            selectedDays.add(DayOfWeek.SUNDAY);
         if (selectedDays.isEmpty()) {
             throw new EmptyFieldException("At least one day of the week must be selected");
         }
@@ -1727,7 +1741,8 @@ public class EventService {
 
                 int mins = request.notification().getMinutesBefore();
                 String type = request.notification().getType();
-                if (type == null) type = "EMAIL";
+                if (type == null)
+                    type = "EMAIL";
 
                 String joinUrl = null;
                 String meetingType = null;
@@ -1755,14 +1770,22 @@ public class EventService {
                 if (savedEvent.getLocation() != null) {
                     List<String> parts = new ArrayList<>();
                     var loc = savedEvent.getLocation();
-                    if (loc.getPlaceName() != null && !loc.getPlaceName().isBlank()) parts.add(loc.getPlaceName());
-                    if (loc.getStreetAddress() != null && !loc.getStreetAddress().isBlank()) parts.add(loc.getStreetAddress());
-                    if (loc.getCity() != null && !loc.getCity().isBlank()) parts.add(loc.getCity());
-                    if (loc.getCountry() != null && !loc.getCountry().isBlank()) parts.add(loc.getCountry());
-                    if (loc.getBuildingName() != null && !loc.getBuildingName().isBlank()) parts.add(loc.getBuildingName());
-                    if (loc.getFloor() != null) parts.add("Floor " + loc.getFloor());
-                    if (loc.getRoom() != null && !loc.getRoom().isBlank()) parts.add("Room " + loc.getRoom());
-                    if (!parts.isEmpty()) locationText = String.join(" · ", parts);
+                    if (loc.getPlaceName() != null && !loc.getPlaceName().isBlank())
+                        parts.add(loc.getPlaceName());
+                    if (loc.getStreetAddress() != null && !loc.getStreetAddress().isBlank())
+                        parts.add(loc.getStreetAddress());
+                    if (loc.getCity() != null && !loc.getCity().isBlank())
+                        parts.add(loc.getCity());
+                    if (loc.getCountry() != null && !loc.getCountry().isBlank())
+                        parts.add(loc.getCountry());
+                    if (loc.getBuildingName() != null && !loc.getBuildingName().isBlank())
+                        parts.add(loc.getBuildingName());
+                    if (loc.getFloor() != null)
+                        parts.add("Floor " + loc.getFloor());
+                    if (loc.getRoom() != null && !loc.getRoom().isBlank())
+                        parts.add("Room " + loc.getRoom());
+                    if (!parts.isEmpty())
+                        locationText = String.join(" · ", parts);
                 }
 
                 Map<String, Object> message = new LinkedHashMap<>();
@@ -1770,8 +1793,10 @@ public class EventService {
                 message.put("userId", calendar.getUserId());
                 message.put("eventTitle", savedEvent.getTitle());
                 message.put("eventDescription", savedEvent.getDescription());
-                message.put("eventStartTime", savedEvent.getStartTime() != null ? savedEvent.getStartTime().toString() : null);
-                message.put("eventEndTime", savedEvent.getEndTime() != null ? savedEvent.getEndTime().toString() : null);
+                message.put("eventStartTime",
+                        savedEvent.getStartTime() != null ? savedEvent.getStartTime().toString() : null);
+                message.put("eventEndTime",
+                        savedEvent.getEndTime() != null ? savedEvent.getEndTime().toString() : null);
                 message.put("allDay", savedEvent.isAllDay());
                 message.put("locationText", locationText);
                 message.put("meetingType", meetingType);
@@ -1794,8 +1819,7 @@ public class EventService {
                 message.put("action", "CREATE");
                 message.put("reminders", List.of(Map.of(
                         "triggerTime", savedEvent.getStartTime().minus(mins, ChronoUnit.MINUTES).toString(),
-                        "type", type
-                )));
+                        "type", type)));
 
                 kafkaTemplate.send("reminder-events", savedEvent.getId(), message);
             } catch (Exception e) {
@@ -1806,14 +1830,16 @@ public class EventService {
     }
 
     /**
-     * Publish an event snapshot update so reminder emails can render up-to-date details
+     * Publish an event snapshot update so reminder emails can render up-to-date
+     * details
      * without calling back into calendar-service.
      *
      * This does not create/cancel reminders; it only updates the stored snapshot.
      */
     private void publishReminderSnapshotUpdate(Event event) {
         try {
-            if (event == null || event.getId() == null || event.getId().isBlank()) return;
+            if (event == null || event.getId() == null || event.getId().isBlank())
+                return;
 
             String joinUrl = null;
             String meetingType = null;
@@ -1841,14 +1867,22 @@ public class EventService {
             if (event.getLocation() != null) {
                 List<String> parts = new ArrayList<>();
                 var loc = event.getLocation();
-                if (loc.getPlaceName() != null && !loc.getPlaceName().isBlank()) parts.add(loc.getPlaceName());
-                if (loc.getStreetAddress() != null && !loc.getStreetAddress().isBlank()) parts.add(loc.getStreetAddress());
-                if (loc.getCity() != null && !loc.getCity().isBlank()) parts.add(loc.getCity());
-                if (loc.getCountry() != null && !loc.getCountry().isBlank()) parts.add(loc.getCountry());
-                if (loc.getBuildingName() != null && !loc.getBuildingName().isBlank()) parts.add(loc.getBuildingName());
-                if (loc.getFloor() != null) parts.add("Floor " + loc.getFloor());
-                if (loc.getRoom() != null && !loc.getRoom().isBlank()) parts.add("Room " + loc.getRoom());
-                if (!parts.isEmpty()) locationText = String.join(" · ", parts);
+                if (loc.getPlaceName() != null && !loc.getPlaceName().isBlank())
+                    parts.add(loc.getPlaceName());
+                if (loc.getStreetAddress() != null && !loc.getStreetAddress().isBlank())
+                    parts.add(loc.getStreetAddress());
+                if (loc.getCity() != null && !loc.getCity().isBlank())
+                    parts.add(loc.getCity());
+                if (loc.getCountry() != null && !loc.getCountry().isBlank())
+                    parts.add(loc.getCountry());
+                if (loc.getBuildingName() != null && !loc.getBuildingName().isBlank())
+                    parts.add(loc.getBuildingName());
+                if (loc.getFloor() != null)
+                    parts.add("Floor " + loc.getFloor());
+                if (loc.getRoom() != null && !loc.getRoom().isBlank())
+                    parts.add("Room " + loc.getRoom());
+                if (!parts.isEmpty())
+                    locationText = String.join(" · ", parts);
             }
 
             Map<String, Object> message = new LinkedHashMap<>();
@@ -1881,7 +1915,8 @@ public class EventService {
 
             kafkaTemplate.send("reminder-events", event.getId(), message);
         } catch (Exception e) {
-            log.warn("Failed to publish reminder snapshot update for event {}: {}", event != null ? event.getId() : null, e.getMessage());
+            log.warn("Failed to publish reminder snapshot update for event {}: {}",
+                    event != null ? event.getId() : null, e.getMessage());
         }
     }
 }

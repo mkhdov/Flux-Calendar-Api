@@ -46,6 +46,7 @@ public class SecurityConfig {
                                 "/users/keycloak/**",
                                 "/api/users/login/**",
                                 "/api/auth/**",
+                                "/api/devices/**",
                                 "/login",
                                 "/oauth2/**",
                                 "/users/sync",

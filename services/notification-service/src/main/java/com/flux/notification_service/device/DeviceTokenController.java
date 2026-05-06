@@ -1,12 +1,14 @@
 package com.flux.notification_service.device;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/api/devices")
+@RequestMapping("/devices")
 @RequiredArgsConstructor
+@Slf4j
 public class DeviceTokenController {
 
     private final DeviceTokenService deviceTokenService;
@@ -17,6 +19,7 @@ public class DeviceTokenController {
      */
     @PostMapping("/token")
     public ResponseEntity<Void> registerToken(@RequestBody DeviceTokenRequest request) {
+        log.info("Received request to register token for user: {}, device: {}", request.userId(), request.deviceId());
         deviceTokenService.upsertToken(request.userId(), request.deviceId(), request.fcmToken());
         return ResponseEntity.ok().build();
     }
@@ -27,10 +30,8 @@ public class DeviceTokenController {
      */
     @DeleteMapping("/token")
     public ResponseEntity<Void> removeToken(@RequestBody DeviceTokenRemoveRequest request) {
+        log.info("Received request to remove token for user: {}, device: {}", request.userId(), request.deviceId());
         deviceTokenService.removeToken(request.userId(), request.deviceId());
         return ResponseEntity.noContent().build();
     }
-
-    public record DeviceTokenRequest(String userId, String deviceId, String fcmToken) {}
-    public record DeviceTokenRemoveRequest(String userId, String deviceId) {}
 }

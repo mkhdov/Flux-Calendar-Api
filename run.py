@@ -35,6 +35,11 @@ SERVICES = [
         "dir": ROOT / "services" / "gateway",
         "port": 8083,
     },
+    {
+        "name": "notification-service",
+        "dir": ROOT / "services" / "notification-service",
+        "port": 8084,
+    },
 ]
 
 STARTUP_TIMEOUT_SECONDS = 180

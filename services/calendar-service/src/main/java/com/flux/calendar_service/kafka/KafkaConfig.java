@@ -15,4 +15,12 @@ public class KafkaConfig {
                 .replicas(1)
                 .build();
     }
+
+    @Bean
+    public NewTopic reminderEventsTopic() {
+        return TopicBuilder.name("reminder-events")
+                .partitions(3)
+                .replicas(1)
+                .build();
+    }
 }

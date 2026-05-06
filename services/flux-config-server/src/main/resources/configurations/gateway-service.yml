@@ -45,9 +45,15 @@ spring:
         - id: notification-service
           uri: http://notification-service:8084
           predicates:
-            - Path=/api/reminders/**
+            - Path=/api/reminders/**, /devices/**
           filters:
             - StripPrefix=0
+        - id: notification-service-api-devices
+          uri: http://notification-service:8084
+          predicates:
+            - Path=/api/devices/**
+          filters:
+            - StripPrefix=1
 
 eureka:
   client:
