@@ -3,6 +3,7 @@ package com.flux.user_management_service.handler;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.flux.user_management_service.exception.*;
 import com.flux.user_management_service.user.dto.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -12,9 +13,6 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
-
-import com.flux.user_management_service.exception.UserAlreadyExistsException;
-import com.flux.user_management_service.exception.UserNotFoundException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -46,6 +44,33 @@ public class GlobalExceptionHandler {
             errors.put(fieldName, errorMessage);
         });
 
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse(errors));
+    }
+
+    @ExceptionHandler(FieldIsEmptyValidatorException.class)
+    public ResponseEntity<ErrorResponse> handleFieldIsEmptyValidatorException(FieldIsEmptyValidatorException exp) {
+        Map<String, String> errors = new HashMap<>();
+        errors.put("error", exp.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse(errors));
+    }
+
+    @ExceptionHandler(IncorrectPasswordException.class)
+    public ResponseEntity<ErrorResponse> handleIncorrectPasswordException(IncorrectPasswordException exp) {
+        Map<String, String> errors = new HashMap<>();
+        errors.put("error", exp.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse(errors));
+    }
+
+    @ExceptionHandler(RepeatedPasswordNotMatchException.class)
+    public ResponseEntity<ErrorResponse> handleRepeatedPasswordNotMatchesException(RepeatedPasswordNotMatchException exp) {
+        Map<String, String> errors = new HashMap<>();
+        errors.put("error", exp.getMessage());
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(new ErrorResponse(errors));

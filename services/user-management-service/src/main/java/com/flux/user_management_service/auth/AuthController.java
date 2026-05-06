@@ -1,6 +1,8 @@
 package com.flux.user_management_service.auth;
 
+import com.flux.user_management_service.auth.dto.ChangePasswordRequest;
 import com.flux.user_management_service.auth.dto.ResendVerificationRequest;
+import com.flux.user_management_service.exception.FieldIsEmptyValidatorException;
 import com.flux.user_management_service.security.UserPrincipal;
 import com.flux.user_management_service.user.UserService;
 import com.flux.user_management_service.user.dto.*;
@@ -72,5 +74,18 @@ class AuthController {
             return ResponseEntity.badRequest()
                     .body(new ApiResponse(false, e.getMessage()));
         }
+    }
+
+//    @PutMapping("/fotgot-password/{id}")
+//    public ResponseEntity<?> forgotPassword() {
+//
+//    }
+
+    @PutMapping("/change-password/{id}")
+    public ResponseEntity<String> changePassword(
+            @PathVariable String userId,
+            @RequestBody ChangePasswordRequest request){
+        authService.changeOldPassword(request, userId);
+        return ResponseEntity.ok("Password is modified successfully!");
     }
 }

@@ -73,7 +73,12 @@ public class EmailService {
             </html>
             """.formatted(user.getFirstname(), confirmationUrl);
 
-        sendEmail(recipientAddress, subject, message);
+        try{
+            sendEmail(recipientAddress, subject, message);
+        }
+        catch (Exception e) {
+            notifyError(recipientAddress, e.getMessage());
+        }
     }
 
     public void sendLoginNotification(User user) {
@@ -115,7 +120,12 @@ public class EmailService {
             </html>
             """.formatted(user.getFirstname(), java.time.LocalDateTime.now());
 
-        sendEmail(recipientAddress, subject, message);
+        try{
+            sendEmail(recipientAddress, subject, message);
+        }
+        catch (Exception e) {
+            notifyError(recipientAddress, e.getMessage());
+        }
     }
 
     public void sendRegistrationSuccessEmail(User user) {
@@ -162,7 +172,62 @@ public class EmailService {
             </html>
             """.formatted(user.getFirstname(), frontendUrl);
 
-        sendEmail(recipientAddress, subject, message);
+        try{
+            sendEmail(recipientAddress, subject, message);
+        }
+        catch (Exception e) {
+            notifyError(recipientAddress, e.getMessage());
+        }
+    }
+
+    public void sendPasswordChangeNotification(String name, String email) {
+
+        String subject = "Password Changed Successfully";
+
+        String message = """
+            <html>
+            <body style="font-family: Arial, sans-serif; background:#f4f6f9; padding:40px;">
+            
+            <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+            
+            <h2 style="color:#2c3e50;">🔒 Password Changed</h2>
+            
+            <p>Hello <b>%s</b>,</p>
+            
+            <p>Your account password has been successfully changed.</p>
+            
+            <div style="background:#f8f9fa; padding:15px; border-radius:8px; margin:20px 0;">
+                <b>Time:</b> %s
+            </div>
+            
+            <p>If you made this change, you can safely ignore this email.</p>
+            
+            <p style="color:#e74c3c;">
+            If you did NOT change your password, please contact our support team immediately.
+            </p>
+            
+            <hr style="margin:30px 0;">
+            
+            <p style="font-size:12px; color:#888;">
+            Flux Security System
+            </p>
+            
+            </div>
+            
+            </body>
+            </html>
+            """.formatted(name, java.time.LocalDateTime.now());
+
+        try{
+            sendEmail(email, subject, message);
+        }
+        catch (Exception e) {
+            notifyError(email, e.getMessage());
+        }
+    }
+
+    private void notifyError(String email, String message) {
+        log.error("Failed to send email to {} due to {}", email, message);
     }
 
 //    private void sendEmail(String to, String subject, String text) {

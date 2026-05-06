@@ -1,5 +1,10 @@
 package com.flux.user_management_service.auth;
 
+import com.flux.user_management_service.auth.dto.ChangePasswordRequest;
+import com.flux.user_management_service.exception.FieldIsEmptyValidatorException;
+import com.flux.user_management_service.exception.IncorrectPasswordException;
+import com.flux.user_management_service.exception.RepeatedPasswordNotMatchException;
+import com.flux.user_management_service.exception.UserNotFoundException;
 import com.flux.user_management_service.security.EmailService;
 import com.flux.user_management_service.security.JwtTokenProvider;
 import com.flux.user_management_service.security.UserPrincipal;
@@ -124,6 +129,30 @@ class AuthService {
         } catch (AuthenticationException e) {
             throw new RuntimeException("Invalid email or password");
         }
+    }
+
+    public void changeOldPassword(ChangePasswordRequest request, String userId) {
+        if(userId.isBlank()) {
+            throw new FieldIsEmptyValidatorException("User ID is not provided!");
+        }
+
+        if(!request.currentPassword().equals(request.repeatedPassword())){
+            throw new RepeatedPasswordNotMatchException("Repeated password does not matches!");
+        }
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException("User not found!"));
+
+        boolean isMatch = passwordEncoder.matches(request.oldPassword(), user.getPassword());
+        if(!isMatch) {
+            throw new IncorrectPasswordException("Password is incorrect, try again!");
+        }
+
+        user.setPassword(passwordEncoder.encode(request.currentPassword()));
+        userRepository.save(user);
+        emailService.sendPasswordChangeNotification(
+                user.getFirstname() + " " + user.getLastname(),
+                user.getEmail());
     }
 
     public ApiResponse resendVerificationEmail(String email) {
