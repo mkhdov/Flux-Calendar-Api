@@ -33,8 +33,8 @@ public class ConnectService {
             String userId) {
         Connect connect = connectRepository.findByUserId(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Connect with this User ID is not found!"));
-        if(connect.isGoogle()){
-            throw new DuplicateResourceException("Google has connected away!");
+        if (connect.isGoogle()) {
+            return;
         }
         connect.setGoogle(true);
         connectRepository.save(connect);
@@ -46,8 +46,8 @@ public class ConnectService {
         Connect connect = connectRepository.findByUserId(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Connect with this User ID is not found!"));
 
-        if(connect.isZoom()){
-            throw new DuplicateResourceException("Google has connected away!");
+        if (connect.isZoom()) {
+            return;
         }
         connect.setZoom(true);
         connectRepository.save(connect);
@@ -58,8 +58,8 @@ public class ConnectService {
             String userId) {
         Connect connect = connectRepository.findByUserId(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Connect with this User ID is not found!"));
-        if(!connect.isGoogle()){
-            throw new DuplicateResourceException("Google has disconnected away!");
+        if (!connect.isGoogle()) {
+            return;
         }
         connect.setGoogle(false);
         connectRepository.save(connect);
@@ -71,8 +71,8 @@ public class ConnectService {
         Connect connect = connectRepository.findByUserId(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Connect with this User ID is not found!"));
 
-        if(!connect.isZoom()){
-            throw new DuplicateResourceException("Google has disconnected away!");
+        if (!connect.isZoom()) {
+            return;
         }
         connect.setZoom(false);
         connectRepository.save(connect);

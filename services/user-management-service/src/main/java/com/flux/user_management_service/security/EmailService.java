@@ -226,6 +226,64 @@ public class EmailService {
         }
     }
 
+    public void sendPasswordResetEmail(String to, String token) {
+        String subject = "Password Reset Request";
+
+        String resetUrl = frontendUrl + "/reset-password?token=" + token;
+
+        String message = """
+            <html>
+            <body style="font-family: Arial, sans-serif; background:#f4f6f9; padding:40px;">
+
+            <div style="max-width:600px; margin:auto; background:white; padding:30px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.1);">
+
+            <h2 style="color:#2c3e50;">🔑 Password Reset</h2>
+
+            <p>Hello,</p>
+
+            <p>We received a request to reset your password. Click the button below to set a new password.</p>
+
+            <div style="text-align:center; margin:30px 0;">
+                <a href="%s"
+                   style="background:#4CAF50;
+                          color:white;
+                          padding:14px 28px;
+                          text-decoration:none;
+                          border-radius:8px;
+                          font-weight:bold;
+                          display:inline-block;">
+                   Reset Password
+                </a>
+            </div>
+
+            <p style="color:#666;">
+            This link will expire in <b>15 minutes</b>.
+            </p>
+
+            <p style="color:#999;">
+            If you didn't request this, you can safely ignore this email.
+            </p>
+
+            <hr style="margin:30px 0;">
+
+            <p style="font-size:12px; color:#888;">
+            Flux Security System
+            </p>
+
+            </div>
+
+            </body>
+            </html>
+            """.formatted(resetUrl);
+
+        try{
+            sendEmail(to, subject, message);
+        }
+        catch (Exception e) {
+            notifyError(to, e.getMessage());
+        }
+    }
+
     private void notifyError(String email, String message) {
         log.error("Failed to send email to {} due to {}", email, message);
     }

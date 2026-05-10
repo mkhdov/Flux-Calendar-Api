@@ -264,11 +264,11 @@ public class EventController {
             @ApiResponse(responseCode = "401", description = "Zoom not connected")
     })
     @PostMapping("/add-zoom/{id}")
-    public ResponseEntity<?> addZoomToEvent(
+    public ResponseEntity<EventResponse> addZoomToEvent(
             @Parameter(description = "ID of the event") @PathVariable String id,
             @Parameter(description = "User ID from authentication", hidden = true) @RequestHeader(value = "X-User-Id") String userId) {
         eventService.addZoomToExistingEvent(id, userId);
-        return ResponseEntity.status(HttpStatus.ACCEPTED).build();
+        return ResponseEntity.status(HttpStatus.OK).body(eventService.getEventById(id));
     }
 
     /**

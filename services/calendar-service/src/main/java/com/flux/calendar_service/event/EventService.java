@@ -17,6 +17,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.flux.calendar_service.attachment.Attachment;
 import com.flux.calendar_service.attachment.AttachmentRepository;
@@ -27,6 +29,7 @@ import com.flux.calendar_service.conference.ConferenceMapper;
 import com.flux.calendar_service.conference.ConferenceRepository;
 import com.flux.calendar_service.event.dto.*;
 import com.flux.calendar_service.exception.ConflictException;
+import org.springframework.dao.DataIntegrityViolationException;
 import com.flux.calendar_service.exception.EmptyFieldException;
 import com.flux.calendar_service.exception.GoogleTokenRevokedException;
 import com.flux.calendar_service.exception.InvalidOperationException;
@@ -196,9 +199,6 @@ public class EventService {
             }
         }
 
-        // ─── Notification / Reminder Creation (Kafka) ───
-        sendReminderNotification(savedEvent, calendar, request);
-
         if (!shouldSyncToGoogle(calendar)) {
             Member member = Member.builder()
                     .fullName("Owner")
@@ -207,6 +207,20 @@ public class EventService {
                     .event(savedEvent)
                     .build();
             memberRepository.save(member);
+        }
+
+        // ─── Notification / Reminder Creation (Kafka) ───
+        // Run AFTER commit to avoid race conditions with notification-service
+        final Event finalSavedEvent = savedEvent;
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    sendReminderNotification(finalSavedEvent, calendar, request);
+                }
+            });
+        } else {
+            sendReminderNotification(savedEvent, calendar, request);
         }
 
         return savedEvent.getId();
@@ -471,7 +485,6 @@ public class EventService {
             }
         }
 
-        // FIX #3: Same as createEvent — skip dummy Owner for Google-synced events.
         if (!shouldSyncToGoogle(calendar)) {
             Member member = Member.builder()
                     .fullName("Owner")
@@ -482,7 +495,17 @@ public class EventService {
             memberRepository.save(member);
         }
 
-        sendReminderNotification(savedEvent, calendar, request);
+        final Event finalEvent = savedEvent;
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    sendReminderNotification(finalEvent, calendar, request);
+                }
+            });
+        } else {
+            sendReminderNotification(savedEvent, calendar, request);
+        }
 
         return savedEvent.getId();
     }
@@ -730,7 +753,17 @@ public class EventService {
             memberRepository.save(member);
         }
 
-        sendReminderNotification(savedEvent, calendar, request);
+        final Event finalZoomEvent = savedEvent;
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    sendReminderNotification(finalZoomEvent, calendar, request);
+                }
+            });
+        } else {
+            sendReminderNotification(savedEvent, calendar, request);
+        }
 
         return savedEvent.getId();
     }
@@ -1275,32 +1308,38 @@ public class EventService {
             log.info("Fetched {} changed events from Google Calendar for user {}", googleEvents.size(), userId);
 
             for (com.google.api.services.calendar.model.Event googleEvent : googleEvents) {
-                try {
-                    if ("cancelled".equals(googleEvent.getStatus())) {
-                        eventRepository.findByGoogleCalendarId(googleEvent.getId())
-                                .ifPresent(event -> {
-                                    log.info("Deleting cancelled Google event: {}", event.getId());
-                                    eventRepository.delete(event);
-                                });
-                        continue;
-                    }
+                if ("cancelled".equals(googleEvent.getStatus())) {
+                    eventRepository.findByGoogleCalendarId(googleEvent.getId())
+                            .ifPresent(event -> {
+                                log.info("Deleting cancelled Google event: {}", event.getId());
+                                eventRepository.delete(event);
+                            });
+                    continue;
+                }
 
-                    if (googleEvent.getStart() == null) {
-                        log.debug("Skipping Google event with no start time: {}", googleEvent.getId());
-                        continue;
-                    }
+                if (googleEvent.getStart() == null) {
+                    log.debug("Skipping Google event with no start time: {}", googleEvent.getId());
+                    continue;
+                }
 
-                    java.util.Optional<Event> existingEventOpt = eventRepository
-                            .findByGoogleCalendarId(googleEvent.getId());
+                java.util.Optional<Event> existingEventOpt = eventRepository
+                        .findByGoogleCalendarId(googleEvent.getId());
 
-                    if (existingEventOpt.isPresent()) {
-                        updateLocalEventFromGoogle(existingEventOpt.get(), googleEvent);
-                    } else {
+                if (existingEventOpt.isPresent()) {
+                    updateLocalEventFromGoogle(existingEventOpt.get(), googleEvent);
+                } else {
+                    try {
                         log.info("Creating new local event from Google event: {}", googleEvent.getId());
                         createLocalEventFromGoogle(calendar, googleEvent);
+                    } catch (DataIntegrityViolationException e) {
+                        log.warn("Concurrent sync conflict: Event with Google ID {} was likely created by another process. Retrying lookup.", googleEvent.getId());
+                        // Final attempt to find the record that caused the constraint violation
+                        eventRepository.findByGoogleCalendarId(googleEvent.getId())
+                                .ifPresentOrElse(
+                                        existing -> updateLocalEventFromGoogle(existing, googleEvent),
+                                        () -> log.error("Failing to resolve sync conflict for Google ID: {}", googleEvent.getId())
+                                );
                     }
-                } catch (Exception e) {
-                    log.error("Failed to process Google event {}: {}", googleEvent.getId(), e.getMessage());
                 }
             }
 
@@ -1741,8 +1780,6 @@ public class EventService {
 
                 int mins = request.notification().getMinutesBefore();
                 String type = request.notification().getType();
-                if (type == null)
-                    type = "EMAIL";
 
                 String joinUrl = null;
                 String meetingType = null;
@@ -1819,7 +1856,7 @@ public class EventService {
                 message.put("action", "CREATE");
                 message.put("reminders", List.of(Map.of(
                         "triggerTime", savedEvent.getStartTime().minus(mins, ChronoUnit.MINUTES).toString(),
-                        "type", type)));
+                        "type", type.toUpperCase())));
 
                 kafkaTemplate.send("reminder-events", savedEvent.getId(), message);
             } catch (Exception e) {

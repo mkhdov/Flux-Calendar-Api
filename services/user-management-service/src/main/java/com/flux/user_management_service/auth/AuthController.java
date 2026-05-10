@@ -76,12 +76,9 @@ class AuthController {
         }
     }
 
-//    @PutMapping("/fotgot-password/{id}")
-//    public ResponseEntity<?> forgotPassword() {
-//
-//    }
 
-    @PutMapping("/change-password/{id}")
+
+    @PutMapping("/change-password/{userId}")
     public ResponseEntity<String> changePassword(
             @PathVariable String userId,
             @RequestBody ChangePasswordRequest request){

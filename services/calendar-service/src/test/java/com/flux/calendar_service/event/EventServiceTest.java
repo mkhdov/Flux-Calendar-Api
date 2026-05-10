@@ -7,16 +7,23 @@ import com.flux.calendar_service.conference.ConferenceRepository;
 import com.flux.calendar_service.event.dto.EventRequest;
 import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.google.GoogleCalendarApiService;
+import com.flux.calendar_service.google.GoogleCalendarApiService.EventsResult;
 import com.flux.calendar_service.location.LocationMapper;
 import com.flux.calendar_service.location.LocationRepository;
+import com.flux.calendar_service.location.LocationService;
 import com.flux.calendar_service.member.MemberRepository;
 import com.flux.calendar_service.event.dto.EventMonthResponse;
+import com.google.api.client.util.DateTime;
+import com.google.api.services.calendar.model.EventDateTime;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
@@ -43,6 +50,8 @@ class EventServiceTest {
         @Mock
         private LocationMapper locationMapper;
         @Mock
+        private LocationService locationService;
+        @Mock
         private ConferenceRepository conferenceRepository;
         @Mock
         private ConferenceMapper conferenceMapper;
@@ -58,6 +67,8 @@ class EventServiceTest {
         private com.flux.calendar_service.note.NoteRepository noteRepository;
         @Mock
         private EventRangeValidator rangeValidator;
+        @Mock
+        private KafkaTemplate<String, Object> kafkaTemplate;
 
         @InjectMocks
         private EventService eventService;
@@ -149,7 +160,7 @@ class EventServiceTest {
                 event.setId("1");
 
                 EventMonthResponse response = new EventMonthResponse(
-                                "1", "Event 1", "#000", now, now.plusSeconds(3600));
+                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false);
 
                 when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class),
                                 any(Instant.class)))
@@ -223,7 +234,7 @@ class EventServiceTest {
                 event.setId("1");
                 Instant now = Instant.now();
                 EventMonthResponse response = new EventMonthResponse(
-                                "1", "Event 1", "#000", now, now.plusSeconds(3600));
+                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false);
 
                 when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class),
                                 any(Instant.class)))
@@ -255,6 +266,39 @@ class EventServiceTest {
 
                 assertEquals(400, ex.getStatusCode().value());
                 assertTrue(ex.getReason().contains("Month must be between 1 and 12"));
+        }
+
+        @Test
+        void syncEventsFromGoogle_WhenEventPersistenceFails_ShouldNotAdvanceSyncToken() throws Exception {
+                ReflectionTestUtils.setField(eventService, "googleCalendarApiService", googleCalendarApiService);
+
+                Calendar calendar = new Calendar();
+                calendar.setId("cal1");
+                calendar.setUserId("user1");
+                calendar.setGoogleSyncToken("old-token");
+
+                com.google.api.services.calendar.model.Event googleEvent =
+                                new com.google.api.services.calendar.model.Event()
+                                                .setId("google-event-1")
+                                                .setSummary("Imported Event")
+                                                .setStart(new EventDateTime()
+                                                                .setDateTime(new DateTime("2026-05-10T10:00:00Z")))
+                                                .setEnd(new EventDateTime()
+                                                                .setDateTime(new DateTime("2026-05-10T11:00:00Z")));
+
+                when(calendarRepository.findById("cal1")).thenReturn(Optional.of(calendar));
+                when(googleCalendarApiService.getEventsWithSyncToken("user1", "old-token"))
+                                .thenReturn(new EventsResult(List.of(googleEvent), "new-token"));
+                when(eventRepository.findByGoogleCalendarId("google-event-1")).thenReturn(Optional.empty());
+                when(eventRepository.save(any(Event.class))).thenThrow(new RuntimeException("database rejected event"));
+
+                RuntimeException ex = assertThrows(RuntimeException.class,
+                                () -> eventService.syncEventsFromGoogle("cal1"));
+
+                assertEquals("database rejected event", ex.getMessage());
+                verify(calendarRepository, never()).save(calendar);
+                assertEquals("old-token", calendar.getGoogleSyncToken());
+                assertNull(calendar.getLastGoogleSync());
         }
 
         @Test

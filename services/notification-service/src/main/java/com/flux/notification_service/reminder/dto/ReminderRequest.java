@@ -20,3 +20,4 @@ public record ReminderRequest(
         @NotNull(message = "Reminder type is required")
         ReminderType type
 ) {}
+

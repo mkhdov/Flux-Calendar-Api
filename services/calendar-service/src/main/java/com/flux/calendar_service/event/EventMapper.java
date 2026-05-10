@@ -103,10 +103,12 @@ public class EventMapper {
 
         return new EventMonthResponse(
                 event.getId(),
+                event.getCalendar().getId(),
                 event.getTitle(),
                 event.getColorHex(),
                 event.getStartTime(),
-                event.getEndTime()
+                event.getEndTime(),
+                event.isAllDay()
         );
     }
 

@@ -124,7 +124,7 @@ class EventControllerTest {
         void getEventsByMonth_ShouldReturnList() throws Exception {
                 Instant now = Instant.now();
                 EventMonthResponse response = new EventMonthResponse(
-                                "1", "Event 1", "#000", now, now.plusSeconds(3600));
+                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false);
 
                 when(eventService.getEventsByMonth(eq("1"), eq(2023), eq(10))).thenReturn(List.of(response));
 

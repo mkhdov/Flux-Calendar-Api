@@ -76,6 +76,15 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(errors));
     }
 
+    @ExceptionHandler(InvalidTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidTokenException(InvalidTokenException exp) {
+        Map<String, String> errors = new HashMap<>();
+        errors.put("error", exp.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse(errors));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleException(Exception exp) throws Exception {
         // Don't intercept Spring's own framework exceptions (e.g. actuator, 404s)

@@ -9,3 +9,4 @@ tokens/
 .DS_Store
 envkeys.txt
 .env
+.certs/

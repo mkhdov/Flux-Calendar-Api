@@ -174,4 +174,6 @@ class AuthService {
 
         return new ApiResponse(true, "Verification email sent successfully. Please check your email.");
     }
+
+
 }
