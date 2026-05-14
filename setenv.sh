@@ -56,7 +56,7 @@ export EUREKA_HOSTNAME="localhost"
 export GITHUB_PUSH_TOKEN="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"
 
 # ============ FRONTEND CONFIGURATION ============
-export FRONTEND_URL="http://localhost:5173,http://192.168.1.17:5173"
+export FRONTEND_URL="http://localhost:5173,http://192.168.1.4:5173"
 
 # ============ SERVICE PORTS ============
 export USER_MANAGEMENT_PORT="8081"

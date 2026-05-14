@@ -1,4 +1,7 @@
 spring:
+  jackson:
+    deserialization:
+      READ_DATE_TIMESTAMPS_AS_NANOSECONDS: false
   datasource:
     url: ${NOTIFICATION_PGURL}
     username: ${NOTIFICATION_PGUSER}

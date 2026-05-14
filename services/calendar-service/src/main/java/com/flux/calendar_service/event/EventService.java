@@ -1771,98 +1771,99 @@ public class EventService {
     }
 
     private void sendReminderNotification(Event savedEvent, Calendar calendar, EventRequest request) {
-        if (request.notification() != null && request.notification().isEnabled()) {
-            try {
-                if (savedEvent.getStartTime() == null) {
-                    log.warn("Skipping reminder event publish: event {} has null startTime", savedEvent.getId());
-                    return;
-                }
+        if (request.notification() == null || !request.notification().isEnabled()) return;
 
-                int mins = request.notification().getMinutesBefore();
-                String type = request.notification().getType();
-
-                String joinUrl = null;
-                String meetingType = null;
-                String meetingCode = null;
-                String dialInPhone = null;
-                String dialInPin = null;
-                String meetingPassword = null;
-
-                if (savedEvent.getConference() != null) {
-                    var conf = savedEvent.getConference();
-                    meetingType = conf.getType() != null ? conf.getType().name() : null;
-                    meetingCode = conf.getMeetingCode();
-                    dialInPhone = conf.getPhoneNumber();
-                    dialInPin = conf.getPin();
-                    meetingPassword = conf.getConferencePassword();
-
-                    if (conf.getConferenceLink() != null && !conf.getConferenceLink().isBlank()) {
-                        joinUrl = conf.getConferenceLink();
-                    } else if (conf.getMeetLink() != null && !conf.getMeetLink().isBlank()) {
-                        joinUrl = conf.getMeetLink();
-                    }
-                }
-
-                String locationText = null;
-                if (savedEvent.getLocation() != null) {
-                    List<String> parts = new ArrayList<>();
-                    var loc = savedEvent.getLocation();
-                    if (loc.getPlaceName() != null && !loc.getPlaceName().isBlank())
-                        parts.add(loc.getPlaceName());
-                    if (loc.getStreetAddress() != null && !loc.getStreetAddress().isBlank())
-                        parts.add(loc.getStreetAddress());
-                    if (loc.getCity() != null && !loc.getCity().isBlank())
-                        parts.add(loc.getCity());
-                    if (loc.getCountry() != null && !loc.getCountry().isBlank())
-                        parts.add(loc.getCountry());
-                    if (loc.getBuildingName() != null && !loc.getBuildingName().isBlank())
-                        parts.add(loc.getBuildingName());
-                    if (loc.getFloor() != null)
-                        parts.add("Floor " + loc.getFloor());
-                    if (loc.getRoom() != null && !loc.getRoom().isBlank())
-                        parts.add("Room " + loc.getRoom());
-                    if (!parts.isEmpty())
-                        locationText = String.join(" · ", parts);
-                }
-
-                Map<String, Object> message = new LinkedHashMap<>();
-                message.put("eventId", savedEvent.getId());
-                message.put("userId", calendar.getUserId());
-                message.put("eventTitle", savedEvent.getTitle());
-                message.put("eventDescription", savedEvent.getDescription());
-                message.put("eventStartTime",
-                        savedEvent.getStartTime() != null ? savedEvent.getStartTime().toString() : null);
-                message.put("eventEndTime",
-                        savedEvent.getEndTime() != null ? savedEvent.getEndTime().toString() : null);
-                message.put("allDay", savedEvent.isAllDay());
-                message.put("locationText", locationText);
-                message.put("meetingType", meetingType);
-                message.put("joinUrl", joinUrl);
-                message.put("meetingCode", meetingCode);
-                message.put("dialInPhone", dialInPhone);
-                message.put("dialInPin", dialInPin);
-                message.put("meetingPassword", meetingPassword);
-                message.put("subtasks", savedEvent.getSubtasks() != null
-                        ? savedEvent.getSubtasks().stream()
-                                .map(st -> {
-                                    Map<String, Object> m = new LinkedHashMap<>();
-                                    m.put("id", st.getId());
-                                    m.put("subtask", st.getSubtask());
-                                    m.put("isDone", st.isDone());
-                                    return m;
-                                })
-                                .toList()
-                        : List.of());
-                message.put("action", "CREATE");
-                message.put("reminders", List.of(Map.of(
-                        "triggerTime", savedEvent.getStartTime().minus(mins, ChronoUnit.MINUTES).toString(),
-                        "type", type.toUpperCase())));
-
-                kafkaTemplate.send("reminder-events", savedEvent.getId(), message);
-            } catch (Exception e) {
-                log.error("Failed to send creation notification to Kafka for event {}: {}", savedEvent.getId(),
-                        e.getMessage());
+        try {
+            if (savedEvent.getStartTime() == null) {
+                log.warn("Skipping reminder event publish: event {} has null startTime", savedEvent.getId());
+                return;
             }
+
+            int mins = request.notification().getMinutesBefore();
+            String type = request.notification().getType();
+
+            // ── Conference fields ──────────────────────────────────────────
+            String joinUrl = null, meetingType = null, meetingCode = null,
+                    dialInPhone = null, dialInPin = null, meetingPassword = null;
+
+            if (savedEvent.getConference() != null) {
+                var conf = savedEvent.getConference();
+                meetingType    = conf.getType() != null ? conf.getType().name() : null;
+                meetingCode    = conf.getMeetingCode();
+                dialInPhone    = conf.getPhoneNumber();
+                dialInPin      = conf.getPin();
+                meetingPassword = conf.getConferencePassword();
+
+                if (conf.getConferenceLink() != null && !conf.getConferenceLink().isBlank()) {
+                    joinUrl = conf.getConferenceLink();
+                } else if (conf.getMeetLink() != null && !conf.getMeetLink().isBlank()) {
+                    joinUrl = conf.getMeetLink();
+                }
+            }
+
+            // ── Location text ──────────────────────────────────────────────
+            String locationText = null;
+            if (savedEvent.getLocation() != null) {
+                List<String> parts = new ArrayList<>();
+                var loc = savedEvent.getLocation();
+                if (loc.getPlaceName()     != null && !loc.getPlaceName().isBlank())     parts.add(loc.getPlaceName());
+                if (loc.getStreetAddress() != null && !loc.getStreetAddress().isBlank()) parts.add(loc.getStreetAddress());
+                if (loc.getCity()          != null && !loc.getCity().isBlank())          parts.add(loc.getCity());
+                if (loc.getCountry()       != null && !loc.getCountry().isBlank())       parts.add(loc.getCountry());
+                if (loc.getBuildingName()  != null && !loc.getBuildingName().isBlank())  parts.add(loc.getBuildingName());
+                if (loc.getFloor()         != null)                                      parts.add("Floor " + loc.getFloor());
+                if (loc.getRoom()          != null && !loc.getRoom().isBlank())          parts.add("Room " + loc.getRoom());
+                if (!parts.isEmpty()) locationText = String.join(" · ", parts);
+            }
+
+            // ── Subtasks ───────────────────────────────────────────────────
+            List<Map<String, Object>> subtasksList = savedEvent.getSubtasks() != null
+                    ? savedEvent.getSubtasks().stream()
+                      .map(st -> {
+                          Map<String, Object> m = new LinkedHashMap<>();
+                          m.put("id",      st.getId());
+                          m.put("subtask", st.getSubtask());
+                          m.put("isDone",  st.isDone());
+                          return m;
+                      }).toList()
+                    : List.of();
+
+            // ── Trigger time ───────────────────────────────────────────────
+            Instant triggerTime = savedEvent.getStartTime().minus(mins, ChronoUnit.MINUTES);
+
+            // ── Build message ──────────────────────────────────────────────
+            // ✅ Instants sent as epoch milliseconds so Jackson deserializes
+            //    them correctly into Instant on the notification-service side
+            Map<String, Object> message = new LinkedHashMap<>();
+            message.put("eventId",          savedEvent.getId());
+            message.put("userId",           calendar.getUserId());
+            message.put("eventTitle",       savedEvent.getTitle());
+            message.put("eventDescription", savedEvent.getDescription());
+            message.put("eventStartTime",   savedEvent.getStartTime().toEpochMilli());   // ✅ was .toString()
+            message.put("eventEndTime",     savedEvent.getEndTime() != null
+                    ? savedEvent.getEndTime().toEpochMilli() // ✅ was .toString()
+                    : null);
+            message.put("allDay",           savedEvent.isAllDay());
+            message.put("locationText",     locationText);
+            message.put("meetingType",      meetingType);
+            message.put("joinUrl",          joinUrl);
+            message.put("meetingCode",      meetingCode);
+            message.put("dialInPhone",      dialInPhone);
+            message.put("dialInPin",        dialInPin);
+            message.put("meetingPassword",  meetingPassword);
+            message.put("subtasks",         subtasksList);
+            message.put("action",           "CREATE");
+            message.put("reminders",        List.of(Map.of(
+                    "triggerTime", triggerTime.toEpochMilli(),   // ✅ was .toString()
+                    "type",        type.toUpperCase()
+            )));
+
+            kafkaTemplate.send("reminder-events", savedEvent.getId(), message);
+            log.info("Published reminder event to Kafka for event {}", savedEvent.getId());
+
+        } catch (Exception e) {
+            log.error("Failed to send creation notification to Kafka for event {}: {}",
+                    savedEvent.getId(), e.getMessage());
         }
     }
 
