@@ -96,8 +96,12 @@ public class ReminderService {
 
             reminder.setEventTitle(event.getEventTitle());
             reminder.setEventDescription(event.getEventDescription());
-            reminder.setEventStartTime(event.getEventStartTime());
-            reminder.setEventEndTime(event.getEventEndTime());
+            reminder.setEventStartTime(detail.getEventStartTime() != null
+                    ? detail.getEventStartTime()
+                    : event.getEventStartTime());
+            reminder.setEventEndTime(detail.getEventEndTime() != null
+                    ? detail.getEventEndTime()
+                    : event.getEventEndTime());
             reminder.setAllDay(event.getAllDay());
             reminder.setLocationText(event.getLocationText());
             reminder.setMeetingType(event.getMeetingType());
@@ -143,8 +147,10 @@ public class ReminderService {
 
             reminder.setEventTitle(event.getEventTitle());
             reminder.setEventDescription(event.getEventDescription());
-            reminder.setEventStartTime(event.getEventStartTime());
-            reminder.setEventEndTime(event.getEventEndTime());
+            if (!Boolean.TRUE.equals(event.getRecurringMaster())) {
+                reminder.setEventStartTime(event.getEventStartTime());
+                reminder.setEventEndTime(event.getEventEndTime());
+            }
             reminder.setAllDay(event.getAllDay());
             reminder.setLocationText(event.getLocationText());
             reminder.setMeetingType(event.getMeetingType());

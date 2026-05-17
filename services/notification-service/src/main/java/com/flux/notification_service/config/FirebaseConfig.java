@@ -15,15 +15,25 @@ import java.nio.charset.StandardCharsets;
 @Slf4j
 public class FirebaseConfig {
 
-    @Value("${firebase.service-account-path}")
+    @Value("${firebase.service-account-path:}")
     private String serviceAccountPath;
 
     @PostConstruct
     public void initFirebase() throws IOException {
+        if (serviceAccountPath == null || serviceAccountPath.isBlank()) {
+            log.warn("Firebase service account path is not configured. Skipping Firebase initialization.");
+            return;
+        }
+
         if (FirebaseApp.getApps().isEmpty()) {
             org.springframework.core.io.Resource resource = 
                 new org.springframework.core.io.DefaultResourceLoader().getResource(serviceAccountPath);
                 
+            if (!resource.exists()) {
+                log.warn("Firebase service account file not found at: {}. Skipping Firebase initialization.", serviceAccountPath);
+                return;
+            }
+
             FirebaseOptions options = FirebaseOptions.builder()
                     .setCredentials(GoogleCredentials.fromStream(resource.getInputStream()))
                     .build();

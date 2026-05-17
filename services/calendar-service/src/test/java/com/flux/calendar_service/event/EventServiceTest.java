@@ -116,7 +116,8 @@ class EventServiceTest {
                                 false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
                                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                                 Collections.emptyList(),
-                                now, now);
+                                now, now,
+                                null, false);
 
                 when(calendarRepository.findById(calendarId)).thenReturn(Optional.of(calendar));
                 when(eventRepository.findByCalendarId(calendarId)).thenReturn(List.of(event));
@@ -139,7 +140,8 @@ class EventServiceTest {
                                 false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
                                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                                 Collections.emptyList(),
-                                now, now);
+                                now, now,
+                                null, false);
 
                 when(eventRepository.findById(id)).thenReturn(Optional.of(event));
                 when(eventMapper.toEventResponse(event)).thenReturn(response);

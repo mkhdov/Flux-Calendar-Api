@@ -258,21 +258,56 @@ public class GoogleCalendarApiService {
 
         public Event createRecurringEvent(String userId, String title, String description,
                         Instant startTime, Instant endTime, String recurrenceRule) throws IOException {
+                return createRecurringEvent(userId, title, description, null, startTime, endTime, null, recurrenceRule);
+        }
 
+        public Event createRecurringEvent(String userId, String title, String description,
+                        Location location, Instant startTime, Instant endTime, String type,
+                        String recurrenceRule) throws IOException {
                 Event event = new Event()
                                 .setSummary(title)
                                 .setDescription(description);
 
                 event.setStart(timedDateTime(startTime));
                 event.setEnd(timedDateTime(endTime));
+                event.setColorId(defineColorId(type));
                 event.setReminders(defaultReminders());
                 event.setRecurrence(Arrays.asList(recurrenceRule));
+
+                if (location != null) {
+                        event.setLocation(formatLocation(location));
+                }
 
                 Event created = getCalendarClient(userId).events()
                                 .insert(targetCalendarId, event)
                                 .execute();
 
                 log.info("Recurring event created for user {}: {}", userId, created.getHtmlLink());
+                return created;
+        }
+
+        public Event createRecurringAllDayEvent(String userId, String title, String description,
+                        Location location, Instant date, String recurrenceRule) throws IOException {
+
+                Event event = new Event()
+                                .setSummary(title)
+                                .setDescription(description);
+
+                java.time.LocalDate startDate = date.atZone(ZoneId.of("UTC")).toLocalDate();
+                event.setStart(allDayDateTime(startDate));
+                event.setEnd(allDayDateTime(startDate.plusDays(1)));
+                event.setReminders(defaultReminders());
+                event.setRecurrence(Arrays.asList(recurrenceRule));
+
+                if (location != null) {
+                        event.setLocation(formatLocation(location));
+                }
+
+                Event created = getCalendarClient(userId).events()
+                                .insert(targetCalendarId, event)
+                                .execute();
+
+                log.info("Recurring all-day event created for user {}: {}", userId, created.getHtmlLink());
                 return created;
         }
 
@@ -782,6 +817,41 @@ public class GoogleCalendarApiService {
                         default -> null;
                 };
         }
+
+//        Recursion
+public List<com.google.api.services.calendar.model.Event> getRecurringEventInstances(
+        String userId, String masterEventId) throws IOException {
+
+        // FIX: use getCalendarClient() — buildCalendarService() does not exist
+        Calendar service = getCalendarClient(userId);
+
+        DateTime timeMin = new DateTime(Instant.now().toEpochMilli());
+        DateTime timeMax = new DateTime(Instant.now().plus(365, ChronoUnit.DAYS).toEpochMilli());
+
+        List<com.google.api.services.calendar.model.Event> allInstances = new ArrayList<>();
+        String pageToken = null;
+
+        do {
+                Calendar.Events.Instances request = service.events()
+                        .instances(targetCalendarId, masterEventId)
+                        .setTimeMin(timeMin)
+                        .setTimeMax(timeMax)
+                        .setMaxResults(250)
+                        .setPageToken(pageToken);
+
+                Events result = request.execute();
+                List<com.google.api.services.calendar.model.Event> items = result.getItems();
+
+                if (items != null) {
+                        allInstances.addAll(items);
+                }
+
+                pageToken = result.getNextPageToken();
+        } while (pageToken != null);
+
+        log.info("Expanded {} instances for master event {}", allInstances.size(), masterEventId);
+        return allInstances;
+}
 
         private void logMeetLinks(Event event) {
                 if (event.getConferenceData() != null && event.getConferenceData().getEntryPoints() != null) {

@@ -37,6 +37,8 @@ public class ReminderEvent {
     private String dialInPin;
     private String meetingPassword;
     private List<Subtask> subtasks;
+    private Boolean recurringMaster;
+    private String recurrenceRule;
     private Action action;
     private List<ReminderDetail> reminders;
 
@@ -55,6 +57,8 @@ public class ReminderEvent {
     public static class ReminderDetail {
         private Instant triggerTime;
         private ReminderType type;
+        private Instant eventStartTime;
+        private Instant eventEndTime;
     }
 
     @Getter

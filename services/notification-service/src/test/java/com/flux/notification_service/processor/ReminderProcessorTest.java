@@ -41,7 +41,6 @@ class ReminderProcessorTest {
     @Mock private ReminderRepository reminderRepository;
     @Mock private NotificationSenderFactory senderFactory;
     @Mock private RedisTemplate<String, String> redisTemplate;
-    @Mock private RestTemplate restTemplate;
     @Mock private ObjectMapper objectMapper;
     @Mock private NotificationSender mockSender;
     @Mock private ValueOperations<String, String> valueOps;
@@ -53,8 +52,6 @@ class ReminderProcessorTest {
     void setUp() {
         ReflectionTestUtils.setField(reminderProcessor, "maxRetryAttempts", 3);
         ReflectionTestUtils.setField(reminderProcessor, "dedupTtlHours", 24L);
-        ReflectionTestUtils.setField(reminderProcessor, "userServiceUrl", "http://localhost:8081");
-        ReflectionTestUtils.setField(reminderProcessor, "calendarServiceUrl", "http://localhost:8083");
     }
 
     @Test
@@ -129,31 +126,40 @@ class ReminderProcessorTest {
     }
 
     @Test
-    void processOne_shouldResolveEmailFromEmailLookupEndpoint() throws Exception {
+    void processOne_shouldBuildPayloadFromReminderFields() throws Exception {
         Reminder reminder = buildReminder("rem-1", ReminderType.EMAIL);
+        reminder.setEventTitle("Event Title");
+        reminder.setEventDescription("Event Desc");
+        reminder.setEventStartTime(Instant.parse("2026-04-01T10:00:00Z"));
+        reminder.setEventEndTime(Instant.parse("2026-04-01T11:00:00Z"));
+        reminder.setAllDay(false);
+        reminder.setLocationText("Conference Room");
+        reminder.setMeetingType("Google Meet");
+        reminder.setJoinUrl("https://meet.google.com/abc-defg-hij");
+        reminder.setSubtasksJson("[{\"id\":\"1\",\"subtask\":\"Prepare slides\",\"isDone\":false}]");
 
         when(redisTemplate.hasKey("reminder:sent:rem-1")).thenReturn(false);
         when(senderFactory.getSender(ReminderType.EMAIL)).thenReturn(mockSender);
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
-        when(restTemplate.getForObject(
-                eq("http://localhost:8081/users/user-1/email"),
-                eq(java.util.Map.class)))
-                .thenReturn(Map.of("email", "user-1@flux.local"));
-
-        when(restTemplate.getForObject(
-                eq("http://localhost:8083/events/event-1/notification"),
-                eq(java.util.Map.class)))
-                .thenReturn(Map.of(
-                        "title", "Event Title",
-                        "startTime", Instant.parse("2026-04-01T10:00:00Z").toString()
-                ));
+        when(objectMapper.readValue(eq("[{\"id\":\"1\",\"subtask\":\"Prepare slides\",\"isDone\":false}]"), eq(java.util.List.class)))
+                .thenReturn(List.of(Map.of("id", "1", "subtask", "Prepare slides", "isDone", false)));
 
         reminderProcessor.processOne(reminder);
 
         ArgumentCaptor<NotificationPayload> captor = ArgumentCaptor.forClass(NotificationPayload.class);
         verify(mockSender).send(captor.capture());
-        assertThat(captor.getValue().getUserEmail()).isEqualTo("user-1@flux.local");
+
+        NotificationPayload payload = captor.getValue();
+        assertThat(payload.getEventTitle()).isEqualTo("Event Title");
+        assertThat(payload.getEventDescription()).isEqualTo("Event Desc");
+        assertThat(payload.getEventStartTime()).isEqualTo(Instant.parse("2026-04-01T10:00:00Z"));
+        assertThat(payload.getEventEndTime()).isEqualTo(Instant.parse("2026-04-01T11:00:00Z"));
+        assertThat(payload.getEventLocation()).isEqualTo("Conference Room");
+        assertThat(payload.getMeetingType()).isEqualTo("Google Meet");
+        assertThat(payload.getMeetingUrl()).isEqualTo("https://meet.google.com/abc-defg-hij");
+        assertThat(payload.getSubtasks()).hasSize(1);
+        assertThat(payload.getSubtasks().get(0).subtask()).isEqualTo("Prepare slides");
     }
 
     private Reminder buildReminder(String id, ReminderType type) {

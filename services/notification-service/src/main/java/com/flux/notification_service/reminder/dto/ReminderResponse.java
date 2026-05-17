@@ -13,6 +13,8 @@ public record ReminderResponse(
         ReminderType type,
         ReminderStatus status,
         int retryCount,
+        Instant eventStartTime,
+        Instant eventEndTime,
         Instant createdAt,
         Instant updatedAt
 ) {}

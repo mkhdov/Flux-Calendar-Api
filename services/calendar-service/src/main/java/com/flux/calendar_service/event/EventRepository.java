@@ -19,8 +19,10 @@ public interface EventRepository extends JpaRepository<Event, String> {
         LEFT JOIN FETCH e.attachments
         LEFT JOIN FETCH e.members
         WHERE e.calendar.id = :calendarId
-        AND e.startTime < :end
-        AND e.endTime > :start
+        AND (
+            (e.recurringMaster = true AND e.startTime < :end)
+            OR (e.recurringMaster = false AND e.startTime < :end AND e.endTime > :start)
+        )
         """)
     List<Event> findRangeEventsWithCoreRelations(
             @Param("calendarId") String calendarId,
@@ -59,8 +61,10 @@ public interface EventRepository extends JpaRepository<Event, String> {
     LEFT JOIN e.location l
     LEFT JOIN e.conference cf
     WHERE c.id = :calendarId
-    AND e.startTime < :end
-    AND e.endTime > :start
+    AND (
+        (e.recurringMaster = true AND e.startTime < :end)
+        OR (e.recurringMaster = false AND e.startTime < :end AND e.endTime > :start)
+    )
     """)
     List<EventSummary> findRangeEventsProjected(
             @Param("calendarId") String calendarId,
@@ -83,4 +87,25 @@ public interface EventRepository extends JpaRepository<Event, String> {
     List<Event> findByCalendarIdAndSyncStatusIn(String calendarId, List<SyncStatus> syncStatuses);
 
     Optional<Event> findByGoogleCalendarId(String googleCalendarId);
+
+    // ── Recurring series queries ──────────────────────────────────────────
+
+    /** All events sharing the same local recurring group (planner batch). */
+    List<Event> findByRecurringGroupId(String recurringGroupId);
+
+    /** Events in the same group whose startTime is >= the given cutoff (for THIS_AND_FOLLOWING). */
+    @Query("SELECT e FROM Event e WHERE e.recurringGroupId = :groupId AND e.startTime >= :from ORDER BY e.startTime ASC")
+    List<Event> findByRecurringGroupIdAndStartTimeGreaterThanEqual(
+            @Param("groupId") String groupId,
+            @Param("from") Instant from);
+
+    /** All events sharing the same Google recurring event (synced series). */
+    List<Event> findByGoogleRecurringEventId(String googleRecurringEventId);
+
+    /** Google-synced recurring events whose startTime >= cutoff. */
+    @Query("SELECT e FROM Event e WHERE e.googleRecurringEventId = :recId AND e.startTime >= :from ORDER BY e.startTime ASC")
+    List<Event> findByGoogleRecurringEventIdAndStartTimeGreaterThanEqual(
+            @Param("recId") String recId,
+            @Param("from") Instant from);
 }
+

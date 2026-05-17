@@ -28,6 +28,8 @@ public class ReminderMapper {
                 reminder.getType(),
                 reminder.getStatus(),
                 reminder.getRetryCount(),
+                reminder.getEventStartTime(),
+                reminder.getEventEndTime(),
                 reminder.getCreatedAt(),
                 reminder.getUpdatedAt()
         );

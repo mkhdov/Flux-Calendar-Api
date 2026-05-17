@@ -61,6 +61,19 @@ public class Event {
     @Column(name = "google_updated_at")
     private Instant googleUpdatedAt;
 
+    @Column(name = "recurrence_rule")
+    private String recurrenceRule;
+
+    @Column(name = "is_recurring_master")
+    private boolean recurringMaster;
+
+    @Column(name = "google_recurring_event_id")
+    private String googleRecurringEventId;
+
+    /** Shared UUID for all events in the same locally-created recurring series. */
+    @Column(name = "recurring_group_id")
+    private String recurringGroupId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "calendar_id", nullable = false)
     private Calendar calendar;

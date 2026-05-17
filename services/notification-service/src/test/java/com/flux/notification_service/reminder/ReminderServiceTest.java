@@ -52,7 +52,7 @@ class ReminderServiceTest {
                 .status(ReminderStatus.PENDING)
                 .build();
         var response = new ReminderResponse("rem-1", "event-1", "user-1", triggerTime,
-                ReminderType.EMAIL, ReminderStatus.PENDING, 0, null, null);
+                ReminderType.EMAIL, ReminderStatus.PENDING, 0, null, null, null, null);
 
         when(reminderRepository.existsByEventIdAndTriggerTimeAndType("event-1", triggerTime, ReminderType.EMAIL))
                 .thenReturn(false);
@@ -87,7 +87,7 @@ class ReminderServiceTest {
                 .eventId("event-1")
                 .build();
         var response = new ReminderResponse("rem-1", "event-1", "user-1", triggerTime,
-                ReminderType.EMAIL, ReminderStatus.PENDING, 0, null, null);
+                ReminderType.EMAIL, ReminderStatus.PENDING, 0, null, null, null, null);
 
         when(reminderRepository.findByEventIdOrderByTriggerTimeAsc("event-1"))
                 .thenReturn(List.of(reminder));
@@ -114,7 +114,7 @@ class ReminderServiceTest {
                 .eventId("event-1")
                 .build();
         var response = new ReminderResponse("rem-1", "event-1", "user-1", triggerTime,
-                ReminderType.EMAIL, ReminderStatus.PENDING, 0, null, null);
+                ReminderType.EMAIL, ReminderStatus.PENDING, 0, null, null, null, null);
 
         when(reminderRepository.findById("rem-1")).thenReturn(Optional.of(reminder));
         when(reminderMapper.toResponse(reminder)).thenReturn(response);
