@@ -66,8 +66,7 @@ class EventControllerTest {
                         false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                         Collections.emptyList(),
-                        now, now,
-                        null, false
+                        now, now
                 );
 
                 when(eventService.getEventsByDateRange(any(), any(), any())).thenReturn(List.of(response));
@@ -159,8 +158,7 @@ class EventControllerTest {
                                 false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
                                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
                                 Collections.emptyList(),
-                                now, now,
-                                null, false);
+                                now, now);
                 when(eventService.getEventById("1")).thenReturn(response);
 
                 mockMvc.perform(get("/events/1"))

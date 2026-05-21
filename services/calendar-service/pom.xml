@@ -111,11 +111,6 @@
 			<version>v3-rev20220715-2.0.0</version>
 		</dependency>
 		<dependency>
-			<groupId>org.mnode.ical4j</groupId>
-			<artifactId>ical4j</artifactId>
-			<version>3.2.18</version>
-		</dependency>
-		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
 			<optional>true</optional>

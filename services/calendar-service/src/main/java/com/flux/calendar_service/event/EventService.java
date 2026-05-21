@@ -16,7 +16,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -241,8 +240,6 @@ public class EventService {
         }
 
         List<DayOfWeek> selectedDays = getTargetDays(planner);
-        // Shared group ID so all occurrences in this batch form one recurring series
-        String recurringGroupId = UUID.randomUUID().toString();
 
         for (int w = 0; w < planner.numOfWeeks(); w++) {
             for (DayOfWeek day : selectedDays) {
@@ -282,7 +279,6 @@ public class EventService {
                         request.notification());
 
                 Event event = eventMapper.toEvent(subRequest, calendar);
-                event.setRecurringGroupId(recurringGroupId);
                 normalizeAllDayEventTimes(event, subRequest);
 
                 createdIds.add(saveSingleEventInternal(calendar, event, subRequest));
@@ -295,7 +291,6 @@ public class EventService {
         List<String> createdIds = new ArrayList<>();
         PlannerRequest planner = request.planner();
         List<DayOfWeek> targetDays = getTargetDays(planner);
-        String recurringGroupId = UUID.randomUUID().toString();
 
         Instant baseStart = request.startTime();
         Instant baseEnd = request.endTime();
@@ -316,7 +311,6 @@ public class EventService {
                         request.subtasks(), request.attachments(), request.location(), null, request.notification());
 
                 Event event = eventMapper.toEvent(newReq, calendar);
-                event.setRecurringGroupId(recurringGroupId);
                 createdIds.add(saveSingleEventWithMeetInternal(calendar, event, newReq));
             }
         }
@@ -327,7 +321,6 @@ public class EventService {
         List<String> createdIds = new ArrayList<>();
         PlannerRequest planner = request.planner();
         List<DayOfWeek> targetDays = getTargetDays(planner);
-        String recurringGroupId = UUID.randomUUID().toString();
 
         Instant baseStart = request.startTime();
         Instant baseEnd = request.endTime();
@@ -348,7 +341,6 @@ public class EventService {
                         request.subtasks(), request.attachments(), request.location(), null, request.notification());
 
                 Event event = eventMapper.toEvent(newReq, calendar);
-                event.setRecurringGroupId(recurringGroupId);
                 createdIds.add(saveSingleEventWithZoomInternal(calendar, event, newReq, userId));
             }
         }
@@ -1203,6 +1195,7 @@ public class EventService {
         }
 
         eventRepository.delete(event);
+        // In deleteEvent():
         try {
             kafkaTemplate.send("reminder-events", id, Map.of(
                     "eventId", id,
@@ -1210,171 +1203,6 @@ public class EventService {
         } catch (Exception e) {
             log.error("Failed to send deletion notification to Kafka for event {}: {}", id, e.getMessage());
         }
-    }
-
-    /**
-     * Delete events in a recurring series according to the given scope.
-     * <ul>
-     *   <li>THIS_EVENT – only the targeted event</li>
-     *   <li>THIS_AND_FOLLOWING – this event and every occurrence that starts on or after it</li>
-     *   <li>ALL_EVENTS – every occurrence in the series</li>
-     * </ul>
-     */
-    @Transactional
-    @CacheEvict(cacheNames = { EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE, EVENTS_DETAIL_CACHE }, allEntries = true)
-    public void deleteRecurringEvent(String id, RecurringScope scope) {
-        if (id == null || id.isBlank()) throw new EmptyFieldException("Event ID cannot be empty");
-        if (scope == null || scope == RecurringScope.THIS_EVENT) {
-            deleteEvent(id);
-            return;
-        }
-
-        Event anchor = eventRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
-
-        List<Event> targets = resolveRecurringSeries(anchor, scope);
-        log.info("Deleting {} events in recurring series (scope={}, anchor={})", targets.size(), scope, id);
-
-        for (Event e : targets) {
-            if (shouldSyncExistingGoogleEvent(e)) {
-                try {
-                    googleCalendarApiService.deleteEvent(e.getCalendar().getUserId(), e.getGoogleCalendarId());
-                } catch (IOException ex) {
-                    log.warn("Could not delete Google Calendar event {}: {}", e.getGoogleCalendarId(), ex.getMessage());
-                }
-            }
-            eventRepository.delete(e);
-            try {
-                kafkaTemplate.send("reminder-events", e.getId(), Map.of("eventId", e.getId(), "action", "DELETE"));
-            } catch (Exception ex) {
-                log.warn("Kafka deletion message failed for event {}: {}", e.getId(), ex.getMessage());
-            }
-        }
-    }
-
-    /**
-     * Update events in a recurring series according to the given scope.
-     * Fields are applied to every matched event; time-related fields shift by the
-     * same delta relative to each event's own start/end (only when THIS_AND_FOLLOWING / ALL_EVENTS).
-     */
-    @Transactional
-    @CacheEvict(cacheNames = { EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE, EVENTS_DETAIL_CACHE }, allEntries = true)
-    public void updateRecurringEvent(String id, EventUpdateRequest request, RecurringScope scope) {
-        if (id == null || id.isBlank()) throw new EmptyFieldException("Event ID cannot be empty");
-        if (scope == null || scope == RecurringScope.THIS_EVENT) {
-            updateEvent(id, request);
-            return;
-        }
-
-        Event anchor = eventRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
-
-        List<Event> targets = resolveRecurringSeries(anchor, scope);
-        log.info("Updating {} events in recurring series (scope={}, anchor={})", targets.size(), scope, id);
-
-        // Compute time delta from anchor if caller is changing the time
-        long startDeltaSeconds = 0;
-        long durationSeconds = 0;
-        boolean timeChanged = request.startTime() != null;
-        if (timeChanged && anchor.getStartTime() != null) {
-            startDeltaSeconds = java.time.Duration.between(anchor.getStartTime(), request.startTime()).getSeconds();
-            if (request.endTime() != null && request.startTime() != null) {
-                durationSeconds = java.time.Duration.between(request.startTime(), request.endTime()).getSeconds();
-            } else if (anchor.getEndTime() != null && anchor.getStartTime() != null) {
-                durationSeconds = java.time.Duration.between(anchor.getStartTime(), anchor.getEndTime()).getSeconds();
-            }
-        }
-
-        for (Event e : targets) {
-            // Apply non-time fields
-            if (request.title() != null && !request.title().isBlank())       e.setTitle(request.title());
-            if (request.description() != null)                                e.setDescription(request.description());
-            if (request.colorHex() != null && !request.colorHex().isBlank()) e.setColorHex(request.colorHex());
-            if (request.type() != null)                                       e.setType(request.type());
-            if (request.status() != null)                                     e.setStatus(request.status());
-            if (request.allDay() != null)                                     e.setAllDay(request.allDay());
-
-            // Apply location
-            if (request.location() != null) {
-                if (e.getLocation() != null) {
-                    locationMapper.updateLocationFromRequest(e.getLocation(), request.location());
-                    locationRepository.save(e.getLocation());
-                } else {
-                    Location loc = locationMapper.toLocation(request.location());
-                    e.setLocation(locationRepository.save(loc));
-                }
-            }
-
-            // Apply conference
-            if (request.conference() != null) {
-                if (e.getConference() != null) {
-                    conferenceMapper.updateConferenceFromRequest(e.getConference(), request.conference());
-                    conferenceRepository.save(e.getConference());
-                } else {
-                    Conference conf = conferenceMapper.toConference(request.conference(), e);
-                    conferenceRepository.save(conf);
-                }
-            }
-
-            // Apply time shift (each event keeps its own date but shifts by the same delta)
-            if (timeChanged && e.getStartTime() != null) {
-                Instant newStart = e.getStartTime().plusSeconds(startDeltaSeconds);
-                e.setStartTime(newStart);
-                if (e.getEndTime() != null) {
-                    e.setEndTime(newStart.plusSeconds(durationSeconds));
-                }
-            }
-
-            eventRepository.save(e);
-            publishReminderSnapshotUpdate(e);
-
-            if (shouldSyncExistingGoogleEvent(e)) {
-                try {
-                    String locName = e.getLocation() != null ? e.getLocation().getPlaceName() : null;
-                    googleCalendarApiService.updateCompleteEvent(
-                            e.getCalendar().getUserId(), e.getGoogleCalendarId(),
-                            e.getTitle(), e.getDescription(),
-                            e.getStartTime(), e.getEndTime(), e.isAllDay(),
-                            locName, Collections.emptyList());
-                    e.setSyncStatus(SyncStatus.SYNCED);
-                } catch (IOException ex) {
-                    log.warn("Google sync failed for recurring event {}: {}", e.getId(), ex.getMessage());
-                    e.setSyncStatus(SyncStatus.PENDING);
-                }
-                eventRepository.save(e);
-            }
-        }
-    }
-
-    /**
-     * Resolves the set of Event entities that belong to the same recurring series
-     * as {@code anchor}, filtered according to {@code scope}.
-     */
-    private List<Event> resolveRecurringSeries(Event anchor, RecurringScope scope) {
-        // Local planner-based series
-        if (anchor.getRecurringGroupId() != null) {
-            return switch (scope) {
-                case ALL_EVENTS -> eventRepository.findByRecurringGroupId(anchor.getRecurringGroupId());
-                case THIS_AND_FOLLOWING -> eventRepository
-                        .findByRecurringGroupIdAndStartTimeGreaterThanEqual(
-                                anchor.getRecurringGroupId(),
-                                anchor.getStartTime() != null ? anchor.getStartTime() : Instant.now());
-                default -> List.of(anchor);
-            };
-        }
-        // Google-synced series
-        if (anchor.getGoogleRecurringEventId() != null) {
-            return switch (scope) {
-                case ALL_EVENTS -> eventRepository.findByGoogleRecurringEventId(anchor.getGoogleRecurringEventId());
-                case THIS_AND_FOLLOWING -> eventRepository
-                        .findByGoogleRecurringEventIdAndStartTimeGreaterThanEqual(
-                                anchor.getGoogleRecurringEventId(),
-                                anchor.getStartTime() != null ? anchor.getStartTime() : Instant.now());
-                default -> List.of(anchor);
-            };
-        }
-        // Not a series — treat as single event
-        return List.of(anchor);
     }
 
     @Transactional

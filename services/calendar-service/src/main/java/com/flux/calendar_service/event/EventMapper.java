@@ -67,10 +67,7 @@ public class EventMapper {
                         ? event.getNotes().stream().map(noteMapper::toNoteResponse).toList()
                         : Collections.emptyList(),
                 event.getCreatedAt(),
-                event.getUpdatedAt(),
-                event.getRecurringGroupId(),
-                event.getRecurringGroupId() != null || event.getGoogleRecurringEventId() != null || event.isRecurringMaster());
-
+                event.getUpdatedAt());
     }
 
     public EventNotificationResponse toEventNotificationResponse(Event event, String joinUrl, String locationText) {

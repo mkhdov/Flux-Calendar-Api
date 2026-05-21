@@ -32,7 +32,5 @@ public record EventResponse(
         @Schema(description = "List of members") List<MemberResponseDTO> members,
         @Schema(description = "List of notes") List<com.flux.calendar_service.note.dto.NoteResponse> notes,
         @Schema(description = "Creation timestamp") Instant createdAt,
-        @Schema(description = "Last update timestamp") Instant updatedAt,
-        @Schema(description = "Shared group ID for locally-created recurring series (null for non-recurring)") String recurringGroupId,
-        @Schema(description = "True if this event belongs to a recurring series") boolean isRecurring) {
+        @Schema(description = "Last update timestamp") Instant updatedAt) {
 }
