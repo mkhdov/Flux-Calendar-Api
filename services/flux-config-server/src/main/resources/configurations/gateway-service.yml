@@ -17,6 +17,13 @@ spring:
         locator:
           enabled: true
           lower-case-service-id: true
+      httpclient:
+        pool:
+          type: elastic
+          max-idle-time: 60
+          max-life-time: 180
+        connect-timeout: 5000
+        response-timeout: 30s
       routes:
         - id: user-management-service-swagger
           uri: http://user-management-service:8081

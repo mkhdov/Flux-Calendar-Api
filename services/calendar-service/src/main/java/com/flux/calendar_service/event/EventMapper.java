@@ -12,6 +12,7 @@ import com.flux.calendar_service.event.dto.EventRequest;
 import com.flux.calendar_service.event.dto.EventNotificationResponse;
 import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.event.dto.EventMonthResponse;
+import com.flux.calendar_service.event.dto.EventListItemResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
 import com.flux.calendar_service.location.LocationMapper;
 import com.flux.calendar_service.member.MemberMapper;
@@ -111,8 +112,34 @@ public class EventMapper {
                 event.getColorHex(),
                 event.getStartTime(),
                 event.getEndTime(),
-                event.isAllDay()
+                event.isAllDay(),
+                event.getRecurringGroupId(),
+                event.getRecurringGroupId() != null || event.getGoogleRecurringEventId() != null || event.isRecurringMaster()
         );
+    }
+    public EventListItemResponse toEventListItemResponse(EventListItemProjection projection) {
+        if (projection == null) {
+            return null;
+        }
+
+        return new EventListItemResponse(
+                projection.getId(),
+                projection.getCalendarId(),
+                projection.getTitle(),
+                projection.getDescription(),
+                projection.getColorHex(),
+                projection.getStartTime(),
+                projection.getEndTime(),
+                Boolean.TRUE.equals(projection.getAllDay()),
+                projection.getStatus(),
+                projection.getRecurringGroupId(),
+                Boolean.TRUE.equals(projection.getRecurring()),
+                Boolean.TRUE.equals(projection.getHasLocation()),
+                Boolean.TRUE.equals(projection.getHasConference()),
+                Boolean.TRUE.equals(projection.getHasSubtasks()),
+                Boolean.TRUE.equals(projection.getHasAttachments()),
+                Boolean.TRUE.equals(projection.getHasMembers()),
+                Boolean.TRUE.equals(projection.getHasNotes()));
     }
 
 
@@ -154,7 +181,7 @@ public class EventMapper {
         if (request.title() != null && !request.title().isBlank()) {
             event.setTitle(request.title());
         }
-        if (request.description() != null && !request.description().isBlank()) {
+        if (request.description() != null) {
             event.setDescription(request.description());
         }
         if (request.colorHex() != null && !request.colorHex().isBlank()) {

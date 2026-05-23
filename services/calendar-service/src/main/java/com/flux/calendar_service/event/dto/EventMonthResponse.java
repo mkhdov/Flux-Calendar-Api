@@ -11,6 +11,8 @@ public record EventMonthResponse(
         @Schema(description = "Hex color code") String colorHex,
         @Schema(description = "Start time") Instant startTime,
         @Schema(description = "End time") Instant endTime,
-        @Schema(description = "All-day flag") boolean allDay
+        @Schema(description = "All-day flag") boolean allDay,
+        @Schema(description = "Shared group ID for locally-created recurring series (null for non-recurring)") String recurringGroupId,
+        @Schema(description = "True if this event belongs to a recurring series") boolean isRecurring
 ) {
 }

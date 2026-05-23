@@ -1,6 +1,7 @@
 package com.flux.calendar_service.event;
 
 import com.flux.calendar_service.event.dto.EventRequest;
+import com.flux.calendar_service.event.dto.EventListItemResponse;
 import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
 import com.flux.calendar_service.event.dto.EventMonthResponse;
@@ -60,14 +61,11 @@ class EventControllerTest {
         void getEventsByDateRange_ShouldReturnList() throws Exception {
                 Instant now = Instant.now();
 
-                EventResponse response = new EventResponse(
-                        "1", null, "Event 1", "Desc", "#000", null, null,
-                        EventType.MEETING, now, now.plusSeconds(3600),
-                        false, SyncStatus.SYNCED, EventStatus.NOTSTARTED,
-                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList(),
-                        Collections.emptyList(),
-                        now, now,
-                        null, false
+                EventListItemResponse response = new EventListItemResponse(
+                        "1", "cal1", "Event 1", "Desc", "#000",
+                        now, now.plusSeconds(3600),
+                        false, EventStatus.NOTSTARTED,
+                        null, false, false, false, false, false, false, false
                 );
 
                 when(eventService.getEventsByDateRange(any(), any(), any())).thenReturn(List.of(response));
@@ -125,7 +123,7 @@ class EventControllerTest {
         void getEventsByMonth_ShouldReturnList() throws Exception {
                 Instant now = Instant.now();
                 EventMonthResponse response = new EventMonthResponse(
-                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false);
+                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false, null, false);
 
                 when(eventService.getEventsByMonth(eq("1"), eq(2023), eq(10))).thenReturn(List.of(response));
 

@@ -401,6 +401,8 @@ public class GoogleCalendarApiService {
                         // and safe from typos.
                         request.setTimeMin(toDateTime(Instant.now().minus(30, ChronoUnit.DAYS)));
                 }
+                
+                request.setSingleEvents(true);
 
                 List<Event> allEvents = new ArrayList<>();
                 Events events;
@@ -413,6 +415,31 @@ public class GoogleCalendarApiService {
 
                 log.info("Incremental sync retrieved {} events for user {}", allEvents.size(), userId);
                 return new EventsResult(allEvents, events.getNextSyncToken());
+        }
+
+        public List<Event> getRecurringEventMasters(String userId) throws IOException {
+                List<Event> recurringMasters = new ArrayList<>();
+                String pageToken = null;
+
+                do {
+                        Events events = getCalendarClient(userId).events()
+                                        .list(targetCalendarId)
+                                        .setSingleEvents(false)
+                                        .setShowDeleted(true)
+                                        .setPageToken(pageToken)
+                                        .execute();
+
+                        if (events.getItems() != null) {
+                                events.getItems().stream()
+                                                .filter(event -> event.getRecurrence() != null
+                                                                && !event.getRecurrence().isEmpty())
+                                                .forEach(recurringMasters::add);
+                        }
+                        pageToken = events.getNextPageToken();
+                } while (pageToken != null);
+
+                log.info("Retrieved {} recurring masters for user {}", recurringMasters.size(), userId);
+                return recurringMasters;
         }
 
         // ========================================================================
@@ -825,7 +852,7 @@ public List<com.google.api.services.calendar.model.Event> getRecurringEventInsta
         // FIX: use getCalendarClient() — buildCalendarService() does not exist
         Calendar service = getCalendarClient(userId);
 
-        DateTime timeMin = new DateTime(Instant.now().toEpochMilli());
+        DateTime timeMin = new DateTime(Instant.now().minus(30, ChronoUnit.DAYS).toEpochMilli());
         DateTime timeMax = new DateTime(Instant.now().plus(365, ChronoUnit.DAYS).toEpochMilli());
 
         List<com.google.api.services.calendar.model.Event> allInstances = new ArrayList<>();

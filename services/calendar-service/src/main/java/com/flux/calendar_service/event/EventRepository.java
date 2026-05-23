@@ -19,12 +19,46 @@ public interface EventRepository extends JpaRepository<Event, String> {
         LEFT JOIN FETCH e.attachments
         LEFT JOIN FETCH e.members
         WHERE e.calendar.id = :calendarId
-        AND (
-            (e.recurringMaster = true AND e.startTime < :end)
-            OR (e.recurringMaster = false AND e.startTime < :end AND e.endTime > :start)
-        )
+        AND e.recurringMaster = false
+        AND e.startTime < :end
+        AND (e.endTime IS NULL OR e.endTime > :start)
         """)
     List<Event> findRangeEventsWithCoreRelations(
+            @Param("calendarId") String calendarId,
+            @Param("start") Instant start,
+            @Param("end") Instant end);
+    @Query("""
+        SELECT
+            e.id AS id,
+            c.id AS calendarId,
+            e.title AS title,
+            e.description AS description,
+            e.colorHex AS colorHex,
+            e.startTime AS startTime,
+            e.endTime AS endTime,
+            e.allDay AS allDay,
+            e.status AS status,
+            e.recurringGroupId AS recurringGroupId,
+            CASE
+                WHEN (e.recurringGroupId IS NOT NULL OR e.googleRecurringEventId IS NOT NULL OR e.recurringMaster = true)
+                THEN true
+                ELSE false
+            END AS recurring,
+            CASE WHEN e.location IS NOT NULL THEN true ELSE false END AS hasLocation,
+            CASE WHEN e.conference IS NOT NULL THEN true ELSE false END AS hasConference,
+            CASE WHEN EXISTS (SELECT 1 FROM Subtask st WHERE st.event = e) THEN true ELSE false END AS hasSubtasks,
+            CASE WHEN EXISTS (SELECT 1 FROM Attachment at WHERE at.event = e) THEN true ELSE false END AS hasAttachments,
+            CASE WHEN EXISTS (SELECT 1 FROM Member mb WHERE mb.event = e) THEN true ELSE false END AS hasMembers,
+            CASE WHEN EXISTS (SELECT 1 FROM Note nt WHERE nt.event = e) THEN true ELSE false END AS hasNotes
+        FROM Event e
+        JOIN e.calendar c
+        WHERE c.id = :calendarId
+        AND e.recurringMaster = false
+        AND e.startTime < :end
+        AND (e.endTime IS NULL OR e.endTime > :start)
+        ORDER BY e.startTime ASC
+        """)
+    List<EventListItemProjection> findRangeEventListItems(
             @Param("calendarId") String calendarId,
             @Param("start") Instant start,
             @Param("end") Instant end);
@@ -61,10 +95,9 @@ public interface EventRepository extends JpaRepository<Event, String> {
     LEFT JOIN e.location l
     LEFT JOIN e.conference cf
     WHERE c.id = :calendarId
-    AND (
-        (e.recurringMaster = true AND e.startTime < :end)
-        OR (e.recurringMaster = false AND e.startTime < :end AND e.endTime > :start)
-    )
+    AND e.recurringMaster = false
+    AND e.startTime < :end
+    AND (e.endTime IS NULL OR e.endTime > :start)
     """)
     List<EventSummary> findRangeEventsProjected(
             @Param("calendarId") String calendarId,
@@ -107,5 +140,40 @@ public interface EventRepository extends JpaRepository<Event, String> {
     List<Event> findByGoogleRecurringEventIdAndStartTimeGreaterThanEqual(
             @Param("recId") String recId,
             @Param("from") Instant from);
+
+    /** All events in a local recurring group, ordered by start time. */
+    @Query("SELECT e FROM Event e WHERE e.recurringGroupId = :groupId ORDER BY e.startTime ASC NULLS LAST")
+    List<Event> findByRecurringGroupIdOrderByStartTime(@Param("groupId") String groupId);
+
+    @Query("""
+        SELECT
+            e.id AS id,
+            c.id AS calendarId,
+            e.title AS title,
+            e.description AS description,
+            e.colorHex AS colorHex,
+            e.startTime AS startTime,
+            e.endTime AS endTime,
+            e.allDay AS allDay,
+            e.status AS status,
+            e.recurringGroupId AS recurringGroupId,
+            CASE
+                WHEN (e.recurringGroupId IS NOT NULL OR e.googleRecurringEventId IS NOT NULL OR e.recurringMaster = true)
+                THEN true
+                ELSE false
+            END AS recurring,
+            CASE WHEN e.location IS NOT NULL THEN true ELSE false END AS hasLocation,
+            CASE WHEN e.conference IS NOT NULL THEN true ELSE false END AS hasConference,
+            CASE WHEN EXISTS (SELECT 1 FROM Subtask st WHERE st.event = e) THEN true ELSE false END AS hasSubtasks,
+            CASE WHEN EXISTS (SELECT 1 FROM Attachment at WHERE at.event = e) THEN true ELSE false END AS hasAttachments,
+            CASE WHEN EXISTS (SELECT 1 FROM Member mb WHERE mb.event = e) THEN true ELSE false END AS hasMembers,
+            CASE WHEN EXISTS (SELECT 1 FROM Note nt WHERE nt.event = e) THEN true ELSE false END AS hasNotes
+        FROM Event e
+        JOIN e.calendar c
+        WHERE e.recurringGroupId = :groupId
+        AND e.recurringMaster = false
+        ORDER BY e.startTime ASC
+        """)
+    List<EventListItemProjection> findListItemsByRecurringGroupIdOrderByStartTime(@Param("groupId") String groupId);
 }
 

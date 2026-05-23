@@ -1,6 +1,7 @@
 package com.flux.calendar_service.event;
 
 import com.flux.calendar_service.event.dto.EventRequest;
+import com.flux.calendar_service.event.dto.EventListItemResponse;
 import com.flux.calendar_service.event.dto.EventNotificationResponse;
 import com.flux.calendar_service.event.dto.EventResponse;
 import com.flux.calendar_service.event.dto.EventUpdateRequest;
@@ -83,7 +84,7 @@ public class EventController {
     @Operation(summary = "Get events by date range", description = "Retrieves events within a specific time range for a given calendar")
     @ApiResponse(responseCode = "200", description = "List of events in the range (may be empty)")
     @GetMapping("/range")
-    public ResponseEntity<List<EventResponse>> getEventsByDateRange(
+    public ResponseEntity<List<EventListItemResponse>> getEventsByDateRange(
             @Parameter(description = "Calendar ID") @RequestParam String calendarId,
             @Parameter(description = "Start time (ISO format; timezone-less values are treated as UTC)") @RequestParam Instant start,
             @Parameter(description = "End time (ISO format; timezone-less values are treated as UTC)") @RequestParam Instant end) {
@@ -138,8 +139,15 @@ public class EventController {
                 .body(eventService.getEventNotificationById(id));
     }
 
+    @Operation(summary = "Get recurring events by group ID")
+    @GetMapping("/recurring-group/{groupId}")
+    public ResponseEntity<List<EventListItemResponse>> getEventsByRecurringGroupId(@PathVariable String groupId) {
+        return ResponseEntity.ok(eventService.getEventsByRecurringGroupId(groupId));
+    }
+
     /**
      * Get all events for a specific calendar
+
      * GET /events/calendar/{calendarId}
      */
     @Operation(summary = "Get events by calendar", description = "Retrieves all events associated with a specific calendar")

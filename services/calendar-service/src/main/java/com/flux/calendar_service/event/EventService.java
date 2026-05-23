@@ -1,12 +1,16 @@
 package com.flux.calendar_service.event;
 
 import java.io.IOException;
+import java.text.ParseException;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
@@ -16,6 +20,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -63,6 +69,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.fortuna.ical4j.model.DateList;
+import net.fortuna.ical4j.model.DateTime;
+import net.fortuna.ical4j.model.Recur;
+import net.fortuna.ical4j.model.parameter.Value;
+import net.fortuna.ical4j.model.property.RRule;
 
 @Service
 @RequiredArgsConstructor
@@ -909,6 +920,13 @@ public class EventService {
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + id));
     }
 
+    @Transactional(readOnly = true)
+    public List<EventListItemResponse> getEventsByRecurringGroupId(String groupId) {
+        return eventRepository.findListItemsByRecurringGroupIdOrderByStartTime(groupId).stream()
+                .map(eventMapper::toEventListItemResponse)
+                .toList();
+    }
+
     @Cacheable(cacheNames = EVENTS_DETAIL_CACHE, key = "'notification:' + #id")
     public EventNotificationResponse getEventNotificationById(String id) {
         if (id == null || id.isBlank()) {
@@ -996,6 +1014,7 @@ public class EventService {
 
         return eventRepository.findByCalendarId(calendarId)
                 .stream()
+                .filter(e -> !e.isRecurringMaster())
                 .filter(e -> e.getType() != null && e.getType() == EventType.MEETING)
                 .filter(e -> {
                     if ("all".equalsIgnoreCase(filter))
@@ -1034,6 +1053,7 @@ public class EventService {
 
         return eventRepository.findByCalendarId(calendarId)
                 .stream()
+                .filter(e -> !e.isRecurringMaster())
                 .map(eventMapper::toEventResponse)
                 .collect(Collectors.toList());
     }
@@ -1045,6 +1065,7 @@ public class EventService {
 
         List<EventResponse> userEvents = eventRepository.findByCalendar_UserId(userId)
                 .stream()
+                .filter(e -> !e.isRecurringMaster())
                 .map(eventMapper::toEventResponse)
                 .toList();
 
@@ -1057,7 +1078,7 @@ public class EventService {
 
     @Transactional(readOnly = true)
     @Cacheable(cacheNames = EVENTS_BY_RANGE_CACHE, key = "#calendarId + ':' + #start.toEpochMilli() + ':' + #end.toEpochMilli()", sync = true)
-    public List<EventResponse> getEventsByDateRange(String calendarId, Instant start, Instant end) {
+    public List<EventListItemResponse> getEventsByDateRange(String calendarId, Instant start, Instant end) {
         if (start == null || end == null) {
             throw new EmptyFieldException("Start and end dates cannot be null");
         }
@@ -1066,9 +1087,9 @@ public class EventService {
         }
         rangeValidator.validate(ViewType.WEEK, start, end);
 
-        return eventRepository.findRangeEventsWithCoreRelations(calendarId, start, end)
+        return eventRepository.findRangeEventListItems(calendarId, start, end)
                 .stream()
-                .map(eventMapper::toEventResponse)
+                .map(eventMapper::toEventListItemResponse)
                 .collect(Collectors.toList());
     }
 
@@ -1235,19 +1256,35 @@ public class EventService {
         List<Event> targets = resolveRecurringSeries(anchor, scope);
         log.info("Deleting {} events in recurring series (scope={}, anchor={})", targets.size(), scope, id);
 
+        boolean googleMasterDeleted = false;
+
         for (Event e : targets) {
             if (shouldSyncExistingGoogleEvent(e)) {
                 try {
-                    googleCalendarApiService.deleteEvent(e.getCalendar().getUserId(), e.getGoogleCalendarId());
+                    if (scope == RecurringScope.ALL_EVENTS && e.getGoogleRecurringEventId() != null) {
+                        if (!googleMasterDeleted) {
+                            googleCalendarApiService.deleteEvent(e.getCalendar().getUserId(), e.getGoogleRecurringEventId());
+                            googleMasterDeleted = true;
+                        }
+                    } else {
+                        googleCalendarApiService.deleteEvent(e.getCalendar().getUserId(), e.getGoogleCalendarId());
+                    }
                 } catch (IOException ex) {
                     log.warn("Could not delete Google Calendar event {}: {}", e.getGoogleCalendarId(), ex.getMessage());
                 }
             }
-            eventRepository.delete(e);
             try {
-                kafkaTemplate.send("reminder-events", e.getId(), Map.of("eventId", e.getId(), "action", "DELETE"));
+                eventRepository.delete(e);
+                eventRepository.flush(); // Flush immediately to catch any StaleObjectStateException inside the loop
+                try {
+                    kafkaTemplate.send("reminder-events", e.getId(), Map.of("eventId", e.getId(), "action", "DELETE"));
+                } catch (Exception ex) {
+                    log.warn("Kafka deletion message failed for event {}: {}", e.getId(), ex.getMessage());
+                }
+            } catch (org.springframework.orm.ObjectOptimisticLockingFailureException | org.hibernate.StaleObjectStateException ex) {
+                log.warn("Event {} or its members were already deleted concurrently - ignoring", e.getId());
             } catch (Exception ex) {
-                log.warn("Kafka deletion message failed for event {}: {}", e.getId(), ex.getMessage());
+                log.warn("Failed to delete local event {}: {}", e.getId(), ex.getMessage());
             }
         }
     }
@@ -1331,11 +1368,23 @@ public class EventService {
             if (shouldSyncExistingGoogleEvent(e)) {
                 try {
                     String locName = e.getLocation() != null ? e.getLocation().getPlaceName() : null;
-                    googleCalendarApiService.updateCompleteEvent(
-                            e.getCalendar().getUserId(), e.getGoogleCalendarId(),
-                            e.getTitle(), e.getDescription(),
-                            e.getStartTime(), e.getEndTime(), e.isAllDay(),
-                            locName, Collections.emptyList());
+                    if (scope == RecurringScope.ALL_EVENTS && e.getGoogleRecurringEventId() != null) {
+                        // For Google recurring events, updating ALL_EVENTS using single instance IDs turns them into exceptions.
+                        // To update the series, we would need to patch the master. But we don't reliably have the master details since singleEvents=true.
+                        // We will just patch the instances as exceptions if there's no other way here, or patch the master if we wanted.
+                        // However, patching the master might override RRULE. To be safe, patching the instance works on Google Calendar too.
+                        googleCalendarApiService.updateCompleteEvent(
+                                e.getCalendar().getUserId(), e.getGoogleCalendarId(),
+                                e.getTitle(), e.getDescription(),
+                                e.getStartTime(), e.getEndTime(), e.isAllDay(),
+                                locName, Collections.emptyList());
+                    } else {
+                        googleCalendarApiService.updateCompleteEvent(
+                                e.getCalendar().getUserId(), e.getGoogleCalendarId(),
+                                e.getTitle(), e.getDescription(),
+                                e.getStartTime(), e.getEndTime(), e.isAllDay(),
+                                locName, Collections.emptyList());
+                    }
                     e.setSyncStatus(SyncStatus.SYNCED);
                 } catch (IOException ex) {
                     log.warn("Google sync failed for recurring event {}: {}", e.getId(), ex.getMessage());
@@ -1481,11 +1530,7 @@ public class EventService {
 
             for (com.google.api.services.calendar.model.Event googleEvent : googleEvents) {
                 if ("cancelled".equals(googleEvent.getStatus())) {
-                    eventRepository.findByGoogleCalendarId(googleEvent.getId())
-                            .ifPresent(event -> {
-                                log.info("Deleting cancelled Google event: {}", event.getId());
-                                eventRepository.delete(event);
-                            });
+                    deleteCancelledGoogleEvent(googleEvent);
                     continue;
                 }
 
@@ -1494,31 +1539,43 @@ public class EventService {
                     continue;
                 }
 
-                java.util.Optional<Event> existingEventOpt = eventRepository
-                        .findByGoogleCalendarId(googleEvent.getId());
-
-                if (existingEventOpt.isPresent()) {
-                    updateLocalEventFromGoogle(existingEventOpt.get(), googleEvent);
+                if (isGoogleRecurringMaster(googleEvent)) {
+                    upsertGoogleEvent(calendar, googleEvent);
+                    syncGoogleRecurringInstances(calendar, googleEvent);
                 } else {
-                    try {
-                        log.info("Creating new local event from Google event: {}", googleEvent.getId());
-                        createLocalEventFromGoogle(calendar, googleEvent);
-                    } catch (DataIntegrityViolationException e) {
-                        log.warn("Concurrent sync conflict: Event with Google ID {} was likely created by another process. Retrying lookup.", googleEvent.getId());
-                        // Final attempt to find the record that caused the constraint violation
-                        eventRepository.findByGoogleCalendarId(googleEvent.getId())
-                                .ifPresentOrElse(
-                                        existing -> updateLocalEventFromGoogle(existing, googleEvent),
-                                        () -> log.error("Failing to resolve sync conflict for Google ID: {}", googleEvent.getId())
-                                );
-                    }
+                    upsertGoogleEvent(calendar, googleEvent);
                 }
+            }
+
+            for (com.google.api.services.calendar.model.Event recurringMaster :
+                    googleCalendarApiService.getRecurringEventMasters(userId)) {
+                if ("cancelled".equals(recurringMaster.getStatus())) {
+                    deleteCancelledGoogleEvent(recurringMaster);
+                    continue;
+                }
+                if (recurringMaster.getStart() == null) {
+                    log.debug("Skipping Google recurring master with no start time: {}", recurringMaster.getId());
+                    continue;
+                }
+                upsertGoogleEvent(calendar, recurringMaster);
+                syncGoogleRecurringInstances(calendar, recurringMaster);
             }
 
             calendar.setGoogleSyncToken(syncResult.getNextSyncToken());
             calendar.setLastGoogleSync(Instant.now());
             calendarRepository.save(calendar);
 
+        } catch (com.google.api.client.googleapis.json.GoogleJsonResponseException e) {
+            if (e.getStatusCode() == 410 || e.getStatusCode() == 400) {
+                log.warn("Invalid sync token for calendar {}. Clearing token and requiring full sync.", calendarId);
+                calendar.setGoogleSyncToken(null);
+                calendarRepository.save(calendar);
+                // Recursively call to run a full sync now without the token
+                syncEventsFromGoogle(calendarId);
+                return;
+            }
+            log.error("Transient Google Calendar API failure for user: {}, calendar: {}", userId, calendarId, e);
+            throw new ServiceUnavailableException("Failed to sync from Google Calendar", e);
         } catch (IOException e) {
             if (GoogleAuthService.isInvalidGrant(e)) {
                 log.error("Google token permanently revoked for user {} during sync. "
@@ -1531,6 +1588,268 @@ public class EventService {
             log.error("Transient Google Calendar sync failure for user: {}, calendar: {}",
                     userId, calendarId, e);
             throw new ServiceUnavailableException("Failed to sync from Google Calendar", e);
+        }
+    }
+
+    private boolean isGoogleRecurringMaster(com.google.api.services.calendar.model.Event googleEvent) {
+        return googleEvent.getRecurringEventId() == null
+                && googleEvent.getRecurrence() != null
+                && !googleEvent.getRecurrence().isEmpty();
+    }
+
+    private void upsertGoogleEvent(Calendar calendar, com.google.api.services.calendar.model.Event googleEvent) {
+        java.util.Optional<Event> existingEventOpt = eventRepository.findByGoogleCalendarId(googleEvent.getId());
+
+        if (existingEventOpt.isPresent()) {
+            updateLocalEventFromGoogle(existingEventOpt.get(), googleEvent);
+            return;
+        }
+
+        try {
+            log.info("Creating new local event from Google event: {}", googleEvent.getId());
+            createLocalEventFromGoogle(calendar, googleEvent);
+        } catch (DataIntegrityViolationException e) {
+            log.warn("Concurrent sync conflict: Event with Google ID {} was likely created by another process. Retrying lookup.",
+                    googleEvent.getId());
+            eventRepository.findByGoogleCalendarId(googleEvent.getId())
+                    .ifPresentOrElse(
+                            existing -> updateLocalEventFromGoogle(existing, googleEvent),
+                            () -> log.error("Failing to resolve sync conflict for Google ID: {}", googleEvent.getId()));
+        }
+    }
+
+    private void syncGoogleRecurringInstances(Calendar calendar, com.google.api.services.calendar.model.Event master)
+            throws IOException {
+        List<com.google.api.services.calendar.model.Event> instances =
+                googleCalendarApiService.getRecurringEventInstances(calendar.getUserId(), master.getId());
+        if (instances.isEmpty()) {
+            instances = expandGoogleRecurringMasterWithIcal4j(master);
+        }
+        java.util.Set<String> activeInstanceIds = new java.util.HashSet<>();
+
+        for (com.google.api.services.calendar.model.Event instance : instances) {
+            if (instance.getId() != null) {
+                activeInstanceIds.add(instance.getId());
+            }
+            if ("cancelled".equals(instance.getStatus())) {
+                deleteCancelledGoogleEvent(instance);
+                continue;
+            }
+            if (instance.getStart() == null) {
+                log.debug("Skipping Google recurring instance with no start time: {}", instance.getId());
+                continue;
+            }
+            upsertGoogleEvent(calendar, instance);
+        }
+
+        Instant expansionStart = Instant.now().minus(1, ChronoUnit.DAYS);
+        eventRepository.findByGoogleRecurringEventId(master.getId()).stream()
+                .filter(event -> event.getStartTime() == null || !event.getStartTime().isBefore(expansionStart))
+                .filter(event -> event.getGoogleCalendarId() != null)
+                .filter(event -> !activeInstanceIds.contains(event.getGoogleCalendarId()))
+                .forEach(event -> {
+                    log.info("Deleting stale local Google recurring instance: {}", event.getId());
+                    eventRepository.delete(event);
+                    sendReminderDeletion(event.getId());
+                });
+    }
+
+    private List<com.google.api.services.calendar.model.Event> expandGoogleRecurringMasterWithIcal4j(
+            com.google.api.services.calendar.model.Event master) {
+        if (master.getRecurrence() == null || master.getRecurrence().isEmpty()
+                || master.getStart() == null || master.getEnd() == null) {
+            return Collections.emptyList();
+        }
+
+        Instant masterStart = googleStartInstant(master);
+        Instant masterEnd = googleEndInstant(master);
+        if (masterStart == null || masterEnd == null || !masterEnd.isAfter(masterStart)) {
+            return Collections.emptyList();
+        }
+
+        boolean allDay = master.getStart().getDate() != null;
+        Duration duration = Duration.between(masterStart, masterEnd);
+        Instant windowStart = Instant.now().minus(30, ChronoUnit.DAYS);
+        Instant windowEnd = Instant.now().plus(365, ChronoUnit.DAYS);
+        Value valueType = allDay ? Value.DATE : Value.DATE_TIME;
+        net.fortuna.ical4j.model.Date seed = toIcalDate(masterStart, allDay);
+        net.fortuna.ical4j.model.Date periodStart = toIcalDate(windowStart, allDay);
+        net.fortuna.ical4j.model.Date periodEnd = toIcalDate(windowEnd, allDay);
+
+        Set<Instant> starts = new TreeSet<>();
+        Set<Instant> exclusions = new HashSet<>();
+
+        for (String recurrenceLine : master.getRecurrence()) {
+            String name = recurrenceName(recurrenceLine);
+            String value = recurrenceValue(recurrenceLine);
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+
+            try {
+                if ("RRULE".equals(name)) {
+                    RRule rule = new RRule(value);
+                    Recur recur = rule.getRecur();
+                    DateList dates = recur.getDates(seed, periodStart, periodEnd, valueType, 1000);
+                    for (net.fortuna.ical4j.model.Date date : dates) {
+                        starts.add(Instant.ofEpochMilli(date.getTime()));
+                    }
+                } else if ("RDATE".equals(name)) {
+                    starts.addAll(parseGoogleRecurrenceDates(value, allDay));
+                } else if ("EXDATE".equals(name)) {
+                    exclusions.addAll(parseGoogleRecurrenceDates(value, allDay));
+                }
+            } catch (ParseException | RuntimeException e) {
+                log.warn("Failed to parse Google recurrence '{}' for master {}: {}",
+                        recurrenceLine, master.getId(), e.getMessage());
+            }
+        }
+
+        starts.removeAll(exclusions);
+        starts.removeIf(start -> start.isBefore(windowStart) || !start.isBefore(windowEnd));
+
+        List<com.google.api.services.calendar.model.Event> instances = starts.stream()
+                .map(start -> buildIcalExpandedGoogleInstance(master, start, start.plus(duration), allDay))
+                .toList();
+        log.info("Expanded {} instances with ical4j for recurring master {}", instances.size(), master.getId());
+        return instances;
+    }
+
+    private com.google.api.services.calendar.model.Event buildIcalExpandedGoogleInstance(
+            com.google.api.services.calendar.model.Event master,
+            Instant start,
+            Instant end,
+            boolean allDay) {
+        com.google.api.services.calendar.model.Event instance = new com.google.api.services.calendar.model.Event();
+        instance.setId(master.getId() + "_" + DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
+                .withZone(ZoneOffset.UTC)
+                .format(start));
+        instance.setRecurringEventId(master.getId());
+        instance.setSummary(master.getSummary());
+        instance.setDescription(master.getDescription());
+        instance.setColorId(master.getColorId());
+        instance.setLocation(master.getLocation());
+        instance.setStatus(master.getStatus());
+        instance.setUpdated(master.getUpdated());
+        instance.setOrganizer(master.getOrganizer());
+        instance.setAttendees(master.getAttendees());
+        instance.setConferenceData(master.getConferenceData());
+        instance.setHangoutLink(master.getHangoutLink());
+        if (allDay) {
+            instance.setStart(new com.google.api.services.calendar.model.EventDateTime()
+                    .setDate(new com.google.api.client.util.DateTime(start.atZone(ZoneOffset.UTC).toLocalDate().toString())));
+            instance.setEnd(new com.google.api.services.calendar.model.EventDateTime()
+                    .setDate(new com.google.api.client.util.DateTime(end.atZone(ZoneOffset.UTC).toLocalDate().toString())));
+        } else {
+            instance.setStart(new com.google.api.services.calendar.model.EventDateTime()
+                    .setDateTime(new com.google.api.client.util.DateTime(java.util.Date.from(start)))
+                    .setTimeZone("UTC"));
+            instance.setEnd(new com.google.api.services.calendar.model.EventDateTime()
+                    .setDateTime(new com.google.api.client.util.DateTime(java.util.Date.from(end)))
+                    .setTimeZone("UTC"));
+        }
+        return instance;
+    }
+
+    private String recurrenceName(String recurrenceLine) {
+        int separator = recurrenceLine.indexOf(':');
+        String left = separator >= 0 ? recurrenceLine.substring(0, separator) : recurrenceLine;
+        int paramSeparator = left.indexOf(';');
+        return (paramSeparator >= 0 ? left.substring(0, paramSeparator) : left).toUpperCase();
+    }
+
+    private String recurrenceValue(String recurrenceLine) {
+        int separator = recurrenceLine.indexOf(':');
+        return separator >= 0 ? recurrenceLine.substring(separator + 1) : recurrenceLine;
+    }
+
+    private Set<Instant> parseGoogleRecurrenceDates(String value, boolean allDay) {
+        Set<Instant> instants = new HashSet<>();
+        for (String token : value.split(",")) {
+            String trimmed = token.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            try {
+                if (allDay || trimmed.length() == 8) {
+                    instants.add(LocalDate.parse(trimmed, DateTimeFormatter.BASIC_ISO_DATE)
+                            .atStartOfDay(ZoneOffset.UTC)
+                            .toInstant());
+                } else if (trimmed.endsWith("Z")) {
+                    instants.add(DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmssX")
+                            .withZone(ZoneOffset.UTC)
+                            .parse(trimmed, Instant::from));
+                } else {
+                    instants.add(LocalDateTime.parse(trimmed, DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss"))
+                            .toInstant(ZoneOffset.UTC));
+                }
+            } catch (RuntimeException e) {
+                log.warn("Skipping unsupported recurrence date '{}': {}", trimmed, e.getMessage());
+            }
+        }
+        return instants;
+    }
+
+    private net.fortuna.ical4j.model.Date toIcalDate(Instant instant, boolean allDay) {
+        if (allDay) {
+            return new net.fortuna.ical4j.model.Date(java.util.Date.from(instant));
+        }
+        DateTime dateTime = new DateTime(java.util.Date.from(instant));
+        dateTime.setUtc(true);
+        return dateTime;
+    }
+
+    private Instant googleStartInstant(com.google.api.services.calendar.model.Event googleEvent) {
+        if (googleEvent.getStart() == null) {
+            return null;
+        }
+        if (googleEvent.getStart().getDate() != null) {
+            return convertToInstant(googleEvent.getStart().getDate());
+        }
+        if (googleEvent.getStart().getDateTime() != null) {
+            return convertToInstant(googleEvent.getStart().getDateTime());
+        }
+        return null;
+    }
+
+    private Instant googleEndInstant(com.google.api.services.calendar.model.Event googleEvent) {
+        if (googleEvent.getEnd() == null) {
+            return null;
+        }
+        if (googleEvent.getEnd().getDate() != null) {
+            return convertToInstant(googleEvent.getEnd().getDate());
+        }
+        if (googleEvent.getEnd().getDateTime() != null) {
+            return convertToInstant(googleEvent.getEnd().getDateTime());
+        }
+        return null;
+    }
+
+    private void deleteCancelledGoogleEvent(com.google.api.services.calendar.model.Event googleEvent) {
+        eventRepository.findByGoogleCalendarId(googleEvent.getId())
+                .ifPresent(event -> {
+                    log.info("Deleting cancelled Google event: {}", event.getId());
+                    eventRepository.delete(event);
+                    sendReminderDeletion(event.getId());
+                });
+
+        if (googleEvent.getRecurringEventId() == null) {
+            eventRepository.findByGoogleRecurringEventId(googleEvent.getId())
+                    .forEach(event -> {
+                        log.info("Deleting instance of cancelled Google recurring series: {}", event.getId());
+                        eventRepository.delete(event);
+                        sendReminderDeletion(event.getId());
+                    });
+        }
+    }
+
+    private void sendReminderDeletion(String eventId) {
+        try {
+            kafkaTemplate.send("reminder-events", eventId, Map.of(
+                    "eventId", eventId,
+                    "action", "DELETE"));
+        } catch (Exception e) {
+            log.error("Failed to send deletion notification to Kafka for event {}: {}", eventId, e.getMessage());
         }
     }
 
@@ -1579,6 +1898,10 @@ public class EventService {
         event.setDescription(googleEvent.getDescription() != null ? googleEvent.getDescription() : "");
         event.setColorHex("#3788d8");
         event.setType(EventType.OTHERS);
+        event.setRecurringMaster(isGoogleRecurringMaster(googleEvent));
+        event.setRecurrenceRule(event.isRecurringMaster()
+                ? String.join("\n", googleEvent.getRecurrence())
+                : null);
 
         if (googleEvent.getColorId() != null) {
             event.setColorHex(mapGoogleColorIdToHex(googleEvent.getColorId()));
@@ -1656,6 +1979,8 @@ public class EventService {
             event.setStartTime(convertToInstant(googleEvent.getStart().getDateTime()));
             event.setEndTime(convertToInstant(googleEvent.getEnd().getDateTime()));
         }
+
+        event.setGoogleRecurringEventId(googleEvent.getRecurringEventId());
 
         event.setSyncStatus(SyncStatus.SYNCED);
     }

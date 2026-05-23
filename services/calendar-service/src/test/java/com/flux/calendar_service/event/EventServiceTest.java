@@ -162,7 +162,7 @@ class EventServiceTest {
                 event.setId("1");
 
                 EventMonthResponse response = new EventMonthResponse(
-                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false);
+                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false, null, false);
 
                 when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class),
                                 any(Instant.class)))
@@ -236,7 +236,7 @@ class EventServiceTest {
                 event.setId("1");
                 Instant now = Instant.now();
                 EventMonthResponse response = new EventMonthResponse(
-                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false);
+                                "1", "cal1", "Event 1", "#000", now, now.plusSeconds(3600), false, null, false);
 
                 when(eventRepository.findRangeEventsWithCoreRelations(eq(calendarId), any(Instant.class),
                                 any(Instant.class)))
