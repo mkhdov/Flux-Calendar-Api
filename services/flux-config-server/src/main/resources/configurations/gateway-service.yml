@@ -46,7 +46,7 @@ spring:
         - id: calendars-service
           uri: http://calendar-service:8083
           predicates:
-            - Path=/calendars, /calendars/**, /events, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /tasks, /tasks/**, /api/users/login/**, /zoom/**, /subtasks/**, /notes/**, /members/**
+            - Path=/calendars, /calendars/**, /events, /events/**, /attachments/**, /conference/**, /auth/**, /event/location/**, /tasks, /tasks/**, /api/users/login/**, /zoom/**, /subtasks/**, /notes/**, /members/**, /connects, /connects/**
           filters:
             - StripPrefix=0
         - id: notification-service

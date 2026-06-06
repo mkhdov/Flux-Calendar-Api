@@ -922,6 +922,9 @@ public class EventService {
 
     @Transactional(readOnly = true)
     public List<EventListItemResponse> getEventsByRecurringGroupId(String groupId) {
+        if (groupId == null || groupId.isBlank()) {          // add guard like getEventById
+            throw new EmptyFieldException("Group ID cannot be empty");
+        }
         return eventRepository.findListItemsByRecurringGroupIdOrderByStartTime(groupId).stream()
                 .map(eventMapper::toEventListItemResponse)
                 .toList();
@@ -1111,7 +1114,7 @@ public class EventService {
 
         rangeValidator.validate(ViewType.MONTH, start, end);
 
-        List<Event> events = loadRangeEvents(calendarId, start, end);
+        List<Event> events = eventRepository.findRangeEventsWithCoreRelations(calendarId, start, end);
         return events.stream()
                 .map(eventMapper::toEventMonthResponse)
                 .collect(Collectors.toList());
@@ -1468,40 +1471,7 @@ public class EventService {
         conferenceRepository.save(conference);
     }
 
-    private List<Event> loadRangeEvents(String calendarId, Instant start, Instant end) {
-        List<Event> events = eventRepository.findRangeEventsWithCoreRelations(calendarId, start, end);
-        if (events.isEmpty()) {
-            return events;
-        }
-
-        List<String> eventIds = events.stream()
-                .map(Event::getId)
-                .toList();
-
-        Map<String, List<Subtask>> subtasksByEvent = subtaskRepository.findAllByEventIdIn(eventIds).stream()
-                .collect(Collectors.groupingBy(subtask -> subtask.getEvent().getId(), LinkedHashMap::new,
-                        Collectors.toList()));
-        Map<String, List<Attachment>> attachmentsByEvent = attachmentRepository.findByEventIdIn(eventIds).stream()
-                .collect(Collectors.groupingBy(attachment -> attachment.getEvent().getId(), LinkedHashMap::new,
-                        Collectors.toList()));
-        Map<String, List<Member>> membersByEvent = memberRepository.findAllMembersByEventIdIn(eventIds).stream()
-                .collect(Collectors.groupingBy(member -> member.getEvent().getId(), LinkedHashMap::new,
-                        Collectors.toList()));
-        Map<String, List<Note>> notesByEvent = noteRepository.findAllByEventIdIn(eventIds).stream()
-                .collect(Collectors.groupingBy(note -> note.getEvent().getId(), LinkedHashMap::new,
-                        Collectors.toList()));
-
-        for (Event event : events) {
-            event.setSubtasks(
-                    new LinkedHashSet<>(subtasksByEvent.getOrDefault(event.getId(), Collections.emptyList())));
-            event.setAttachments(
-                    new LinkedHashSet<>(attachmentsByEvent.getOrDefault(event.getId(), Collections.emptyList())));
-            event.setMembers(new LinkedHashSet<>(membersByEvent.getOrDefault(event.getId(), Collections.emptyList())));
-            event.setNotes(new LinkedHashSet<>(notesByEvent.getOrDefault(event.getId(), Collections.emptyList())));
-        }
-
-        return events;
-    }
+    // Note: If load collections separately are needed in future for batch processing, use eventRepository.fetchSubtasksForEvents(events), etc.
 
     @Transactional
     @CacheEvict(cacheNames = { EVENTS_BY_RANGE_CACHE, EVENTS_BY_MONTH_CACHE }, allEntries = true)

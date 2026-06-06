@@ -2,6 +2,7 @@ package com.flux.calendar_service.kafka;
 
 import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.calendar.CalendarRepository;
+import com.flux.calendar_service.user.UserDataCleanupService;
 import com.flux.calendar_service.user.UserSyncRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +31,9 @@ class UserConsumerTest {
 
     @Mock
     private com.flux.calendar_service.connects.ConnectService connectService;
+
+    @Mock
+    private UserDataCleanupService userDataCleanupService;
 
     @InjectMocks
     private UserConsumer userConsumer;
@@ -83,7 +87,7 @@ class UserConsumerTest {
 
         userConsumer.consumeUserEvent(event);
 
-        verify(userSyncRepository).deleteById("user-1");
+        verify(userDataCleanupService).cleanupDeletedUser("user-1");
         verify(userSyncRepository, never()).save(any());
         verify(calendarRepository, never()).save(any(Calendar.class));
     }

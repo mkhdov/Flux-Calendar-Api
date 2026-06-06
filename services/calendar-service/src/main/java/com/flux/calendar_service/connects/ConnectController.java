@@ -21,7 +21,7 @@ public class ConnectController {
     }
 
     @GetMapping("/user/{id}")
-    public ResponseEntity<ConnectResponsePerUser> getConnectUserPerId(@PathVariable String userId) {
+    public ResponseEntity<ConnectResponsePerUser> getConnectUserPerId(@PathVariable("id") String userId) {
         return ResponseEntity.ok().body(connectService.getConnectByUserId(userId));
     }
 }

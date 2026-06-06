@@ -3,6 +3,7 @@ package com.flux.calendar_service.kafka;
 import com.flux.calendar_service.calendar.Calendar;
 import com.flux.calendar_service.calendar.CalendarRepository;
 import com.flux.calendar_service.connects.ConnectService;
+import com.flux.calendar_service.user.UserDataCleanupService;
 import com.flux.calendar_service.user.UserSync;
 import com.flux.calendar_service.user.UserSyncRepository;
 
@@ -26,6 +27,7 @@ public class UserConsumer {
     private final UserSyncRepository userSyncRepository;
     private final CalendarRepository calendarRepository;
     private final ConnectService connectService;
+    private final UserDataCleanupService userDataCleanupService;
 
     @KafkaListener(topics = "user-topic", groupId = "calendar-group")
     public void consumeUserEvent(UserEvent event) {
@@ -37,8 +39,7 @@ public class UserConsumer {
         }
 
         if (USER_DELETED_TYPE.equals(event.getType())) {
-            userSyncRepository.deleteById(event.getUserId());
-            log.info("Deleted user sync data for ID: {}", event.getUserId());
+            userDataCleanupService.cleanupDeletedUser(event.getUserId());
             return;
         }
 

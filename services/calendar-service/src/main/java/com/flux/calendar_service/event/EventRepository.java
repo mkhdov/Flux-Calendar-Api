@@ -15,9 +15,6 @@ public interface EventRepository extends JpaRepository<Event, String> {
         JOIN FETCH e.calendar
         LEFT JOIN FETCH e.location
         LEFT JOIN FETCH e.conference
-        LEFT JOIN FETCH e.subtasks
-        LEFT JOIN FETCH e.attachments
-        LEFT JOIN FETCH e.members
         WHERE e.calendar.id = :calendarId
         AND e.recurringMaster = false
         AND e.startTime < :end
@@ -27,6 +24,16 @@ public interface EventRepository extends JpaRepository<Event, String> {
             @Param("calendarId") String calendarId,
             @Param("start") Instant start,
             @Param("end") Instant end);
+
+    @Query("SELECT e FROM Event e LEFT JOIN FETCH e.subtasks WHERE e IN :events")
+    List<Event> fetchSubtasksForEvents(@Param("events") List<Event> events);
+
+    @Query("SELECT e FROM Event e LEFT JOIN FETCH e.attachments WHERE e IN :events")
+    List<Event> fetchAttachmentsForEvents(@Param("events") List<Event> events);
+
+    @Query("SELECT e FROM Event e LEFT JOIN FETCH e.members WHERE e IN :events")
+    List<Event> fetchMembersForEvents(@Param("events") List<Event> events);
+
     @Query("""
         SELECT
             e.id AS id,
